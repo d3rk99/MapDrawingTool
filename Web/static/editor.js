@@ -472,11 +472,74 @@ async function refreshAccount() {
   })));
   $("authorRow").hidden = !!me.user;
   showOptions(me);
+  loadMine();
   $("access").hidden = me.canSubmit;
   $("access").textContent = me.why;
   $("submit").disabled = !me.canSubmit;
 }
 $("signout").onclick = async () => { await MDT.api("/logout", { method: "POST" }); refreshAccount(); };
+
+// ------------------------------------------------------------- my submissions
+// The signed-in player's own work on this map, with a small preview and Remove (any status; it
+// leaves the game at once and the owner sees it as withdrawn). Also reachable in game (X on the map).
+const STATUS_TEXT = { pending: "waiting for approval", approved: "on the map", rejected: "rejected" };
+
+async function loadMine() {
+  const box = $("mine");
+  if (!state.me?.user) { $("mineSection").hidden = true; return; }
+  let items;
+  try { items = await MDT.api(`/api/${state.world}/mine`); } catch { $("mineSection").hidden = true; return; }
+  $("mineSection").hidden = false;
+  box.replaceChildren();
+  if (!items.length) { box.textContent = "Nothing yet."; return; }
+  for (const it of items) box.append(mineCard(it));
+}
+
+function mineCard(it) {
+  const row = document.createElement("div");
+  row.className = "mine-item";
+  const c = document.createElement("canvas");
+  c.width = c.height = 96;
+  minePreview(c, it);
+  const info = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = it.kind === "marker" ? `📍 ${it.text || "Marker"}` : it.title || "Untitled drawing";
+  const meta = document.createElement("small");
+  const until = !it.expires ? "" : it.expires < new Date().toISOString() ? " · expired" : ` · until ${it.expires.slice(0, 10)}`;
+  meta.textContent = `${STATUS_TEXT[it.status] || it.status} · ${it.scope === "personal" ? "only me" : "everyone"}${until}`;
+  const del = document.createElement("button");
+  del.className = "bad";
+  del.textContent = "Remove";
+  del.onclick = async () => {
+    if (!confirm(`Remove "${title.textContent}"? It disappears from the map for good.`)) return;
+    try { await MDT.api(`/api/${state.world}/mine/${it.id}/withdraw`, { method: "POST" }); say("Removed."); }
+    catch (err) { say(err.message, true); }
+    loadMine();
+  };
+  info.append(title, document.createElement("br"), meta, document.createElement("br"), del);
+  row.append(c, info);
+  return row;
+}
+
+// The map around the submission, with its image (or marker) on top.
+async function minePreview(c, it) {
+  const x = c.getContext("2d");
+  const [x0, z0, x1, z1] = it.rect;
+  let [tx0, ty0] = worldToTex(x0, z1), [tx1, ty1] = worldToTex(x1, z0);
+  const span = Math.max(tx1 - tx0, ty1 - ty0) * 1.3 + 8;
+  const cx = (tx0 + tx1) / 2, cy = (ty0 + ty1) / 2, k = c.width / span;
+  x.drawImage(state.base, cx - span / 2, cy - span / 2, span, span, 0, 0, c.width, c.height);
+  const toC = (tx, ty) => [(tx - (cx - span / 2)) * k, (ty - (cy - span / 2)) * k];
+  if (it.kind === "marker") {
+    MDT.drawMarker(x, ...toC(cx, cy), { color: "#FFC00000", icon: 0, text: "" });
+    return;
+  }
+  try {
+    const img = await MDT.loadImage(`/api/${state.world}/image/${it.id}`);
+    const [px, py] = toC(tx0, ty0);
+    x.drawImage(img, px, py, (tx1 - tx0) * k, (ty1 - ty0) * k);
+  } catch {}
+}
 
 $("submit").onclick = async () => {
   const meta = who();

@@ -22,9 +22,10 @@ import json
 import threading
 import urllib.request
 
-COLORS = {"submitted": 0xC9A24A, "approved": 0x3FA34D, "rejected": 0xC0392B, "deleted": 0x7F8C8D, "test": 0x3498DB}
+COLORS = {"submitted": 0xC9A24A, "approved": 0x3FA34D, "rejected": 0xC0392B, "deleted": 0x7F8C8D, "withdrawn": 0x95A5A6,
+          "test": 0x3498DB}
 VERBS = {"submitted": "New submission waiting for approval", "approved": "Approved", "rejected": "Rejected",
-         "deleted": "Deleted", "test": "Test from the admin page"}
+         "deleted": "Deleted", "withdrawn": "Removed by its author", "test": "Test from the admin page"}
 
 
 def send(cfg, event, map_info, sub, admin_url):

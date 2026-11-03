@@ -26,7 +26,19 @@ modded class MapMenu
 	protected int m_MDT_Scope;                                  // index into MDT_Scopes()
 	protected int m_MDT_Life = -1;                              // index into options.lifespans
 	protected Widget m_MDT_Bar;
-	protected TextWidget m_MDT_BarText;
+	protected TextWidget m_MDT_BarStatus;
+	protected Widget m_MDT_BarKeys;
+	protected int m_MDT_BarMode = -1;                           // which key list the bar shows
+	protected Widget m_MDT_Catch;                               // over the map while drawing: it gets no left clicks
+	protected bool m_MDT_Panning;
+	protected int m_MDT_PanX, m_MDT_PanY;
+	protected vector m_MDT_PanFrom;
+	protected float m_MDT_LastScale;
+	// X: the player's own submissions, one at a time (map moves to it, outline and line preview)
+	protected bool m_MDT_Browse;
+	protected int m_MDT_BrowseIdx;
+	protected int m_MDT_BrowseSeen = -1;
+	protected float m_MDT_DeleteArmed;                          // seconds left to press Delete again
 
 	override Widget Init()
 	{
@@ -46,11 +58,18 @@ modded class MapMenu
 				m_MapWidgetInstance.AddUserMark(Vector(m.x, 0, m.z), m.text, m.color, MapMarkerTypes.GetMarkerTypeFromID(m.icon));
 		}
 		MDT_Refresh();
+		m_MDT_Catch = GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawcatch.layout", layoutRoot);
+		if (m_MDT_Catch)
+		{
+			m_MDT_Catch.SetSort(999);
+			m_MDT_Catch.Show(false);
+		}
 		m_MDT_Bar = GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawbar.layout", layoutRoot);
 		if (m_MDT_Bar)
 		{
 			m_MDT_Bar.SetSort(1001);
-			m_MDT_BarText = TextWidget.Cast(m_MDT_Bar.FindAnyWidget("MDTDrawText"));
+			m_MDT_BarStatus = TextWidget.Cast(m_MDT_Bar.FindAnyWidget("MDTDrawStatus"));
+			m_MDT_BarKeys = m_MDT_Bar.FindAnyWidget("MDTDrawKeys");
 			m_MDT_Bar.Show(false);
 		}
 		return root;
@@ -151,8 +170,10 @@ modded class MapMenu
 
 	// ---------------------------------------------------------------- drawing in game
 	// Keys while the full-screen map is open (raw keys: the "map" input group is excluded here):
-	// D draw on/off, left mouse draws, Z undo, Backspace clear, C pen colour, W line width,
-	// G everyone / only me, L lifespan, Enter send. The map is held still while the mouse button is down.
+	// D draw on/off, left mouse draws, right mouse drags the map, wheel or +/- zooms, Z undo,
+	// Backspace clear, C pen colour, W line width, G everyone / only me, L lifespan, Enter send.
+	// While drawing, a see-through panel covers the map so its own left-drag panning never starts;
+	// the map is also held still while the left button is down, in case a drag still reaches it.
 
 	protected MDT_Options MDT_Opts()
 	{
@@ -242,6 +263,23 @@ modded class MapMenu
 		if (m_MDT_Life < 0 && o.lifespans && o.lifespans.Count() > 0)
 			m_MDT_Life = Math.Max(0, o.lifespans.Find(o.defaultDays));
 
+		if (m_MDT_Catch)
+			m_MDT_Catch.Show(m_MDT_Drawing);
+		if (MDT_Key(KeyCode.KC_X))
+		{
+			m_MDT_Browse = !m_MDT_Browse;
+			if (m_MDT_Browse)
+				MDT_AskMine();
+			else
+				MDT_Draft.s_Status = "";
+		}
+		if (m_MDT_Browse)
+		{
+			m_MDT_Drawing = false;
+			MDT_Browse(mx, my, pxPerMetre);
+			MDT_ShowBar(scopes);
+			return;
+		}
 		if (MDT_Key(KeyCode.KC_D))
 		{
 			MDT_FindPens();
@@ -274,7 +312,10 @@ modded class MapMenu
 			if (MDT_Key(KeyCode.KC_RETURN))
 				MDT_SendDraft(scopes);
 			MDT_TrackMouse();
+			MDT_PanAndZoom(pxPerMetre);
 		}
+		else
+			m_MDT_Panning = false;
 		if (m_MDT_Scope >= scopes.Count())
 			m_MDT_Scope = 0;
 
@@ -384,34 +425,272 @@ modded class MapMenu
 		MDT_Draft.s_Status = "Sending...";
 	}
 
+	// Right mouse drags the map (the cover panel keeps the map's own dragging off); wheel or +/- zoom
+	// around the mouse.
+	protected void MDT_PanAndZoom(float pxPerMetre)
+	{
+		int x, y;
+		GetMousePos(x, y);
+		bool right = (GetMouseState(MouseState.RIGHT) & MB_PRESSED_MASK) != 0;
+		if (right && !m_MDT_Current)
+		{
+			if (!m_MDT_Panning)
+			{
+				m_MDT_Panning = true;
+				m_MDT_PanX = x;
+				m_MDT_PanY = y;
+				m_MDT_PanFrom = m_MapWidgetInstance.GetMapPos();
+			}
+			else if (pxPerMetre > 0)
+			{
+				// screen right = world east (+x), screen down = world south (-z)
+				float east = (m_MDT_PanX - x) / pxPerMetre;
+				float north = (y - m_MDT_PanY) / pxPerMetre;
+				m_MapWidgetInstance.SetMapPos(m_MDT_PanFrom + Vector(east, 0, north));
+			}
+		}
+		else
+			m_MDT_Panning = false;
+
+		int wheel = GetMouseState(MouseState.WHEEL);
+		float zoom = 1;
+		if (MDT_Key(KeyCode.KC_ADD) || MDT_Key(KeyCode.KC_EQUALS))
+			zoom = 0.8;
+		else if (MDT_Key(KeyCode.KC_SUBTRACT) || MDT_Key(KeyCode.KC_MINUS))
+			zoom = 1.25;
+		else if (wheel != 0 && m_MapWidgetInstance.GetScale() == m_MDT_LastScale)
+		{
+			// only when the map did not zoom itself this frame (the cover panel may or may not stop it)
+			if (wheel > 0)
+				zoom = 0.8;
+			else
+				zoom = 1.25;
+		}
+		if (zoom != 1)
+		{
+			vector before = m_MapWidgetInstance.ScreenToMap(Vector(x, y, 0));
+			m_MapWidgetInstance.SetScale(Math.Clamp(m_MapWidgetInstance.GetScale() * zoom, 0.01, 1));
+			vector after = m_MapWidgetInstance.ScreenToMap(Vector(x, y, 0));
+			m_MapWidgetInstance.SetMapPos(m_MapWidgetInstance.GetMapPos() + before - after);
+		}
+		m_MDT_LastScale = m_MapWidgetInstance.GetScale();
+	}
+
+	protected void MDT_AskMine()
+	{
+		PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
+		if (!player)
+			return;
+		ScriptRPC rpc = new ScriptRPC();
+		rpc.Send(player, MDT_RPC_MINE_ASK, true, null);
+		MDT_Draft.s_Status = "Loading your drawings...";
+		m_MDT_DeleteArmed = 0;
+	}
+
+	protected MDT_MineItem MDT_BrowseItem()
+	{
+		MDT_MineList list = MDT_Mine.s_List;
+		if (!list || !list.items || list.items.Count() == 0)
+			return null;
+		m_MDT_BrowseIdx = Math.Clamp(m_MDT_BrowseIdx, 0, list.items.Count() - 1);
+		return list.items[m_MDT_BrowseIdx];
+	}
+
+	// Moves the map so the item fills about a third of the screen.
+	protected void MDT_FocusItem(MDT_MineItem it, float pxPerMetre)
+	{
+		if (!it || !it.rect || it.rect.Count() != 4 || pxPerMetre <= 0)
+			return;
+		float w, h;
+		m_MapWidgetInstance.GetScreenSize(w, h);
+		float size = Math.Max(it.rect[2] - it.rect[0], it.rect[3] - it.rect[1]);
+		float scale = m_MapWidgetInstance.GetScale() * size * pxPerMetre / (0.35 * Math.Max(w, 1));
+		m_MapWidgetInstance.SetScale(Math.Clamp(scale, 0.01, 1));
+		m_MapWidgetInstance.SetMapPos(Vector((it.rect[0] + it.rect[2]) / 2, 0, (it.rect[1] + it.rect[3]) / 2));
+	}
+
+	protected void MDT_Browse(float mx, float my, float pxPerMetre)
+	{
+		MDT_MineList list = MDT_Mine.s_List;
+		if (m_MDT_BrowseSeen != MDT_Mine.s_Received)
+		{
+			m_MDT_BrowseSeen = MDT_Mine.s_Received;
+			if (MDT_Draft.s_Status == "Loading your drawings...")
+				MDT_Draft.s_Status = "";
+			if (list && !list.ok)
+				MDT_Draft.s_Status = list.error;
+			MDT_FocusItem(MDT_BrowseItem(), pxPerMetre);
+		}
+		int count = 0;
+		if (list && list.items)
+			count = list.items.Count();
+		if (count > 0 && (MDT_Key(KeyCode.KC_RIGHT) || MDT_Key(KeyCode.KC_DOWN)))
+		{
+			m_MDT_BrowseIdx = (m_MDT_BrowseIdx + 1) % count;
+			m_MDT_DeleteArmed = 0;
+			MDT_FocusItem(MDT_BrowseItem(), pxPerMetre);
+		}
+		if (count > 0 && (MDT_Key(KeyCode.KC_LEFT) || MDT_Key(KeyCode.KC_UP)))
+		{
+			m_MDT_BrowseIdx = (m_MDT_BrowseIdx + count - 1) % count;
+			m_MDT_DeleteArmed = 0;
+			MDT_FocusItem(MDT_BrowseItem(), pxPerMetre);
+		}
+		MDT_MineItem it = MDT_BrowseItem();
+		if (m_MDT_DeleteArmed > 0)
+			m_MDT_DeleteArmed -= 0.016;                         // about a frame; only needs to be rough
+		if (it && MDT_Key(KeyCode.KC_DELETE))
+		{
+			if (m_MDT_DeleteArmed > 0)
+			{
+				PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
+				if (player)
+				{
+					ScriptRPC rpc = new ScriptRPC();
+					rpc.Write(it.id);
+					rpc.Send(player, MDT_RPC_WITHDRAW, true, null);
+					MDT_Draft.s_Status = "Removing...";
+				}
+				m_MDT_DeleteArmed = 0;
+			}
+			else
+			{
+				m_MDT_DeleteArmed = 3;
+				MDT_Draft.s_Status = "Press Delete again to remove it for good";
+			}
+		}
+		MDT_PanAndZoom(pxPerMetre);
+		if (!it || !it.rect || it.rect.Count() != 4)
+			return;
+		// line drawings: their lines (also the ones still waiting for approval); then an outline
+		if (it.strokes)
+		{
+			foreach (MDT_Stroke s : it.strokes)
+				MDT_DrawStroke(s, mx, my, pxPerMetre);
+		}
+		CanvasWidget canvas = MDT_Canvas(255);
+		if (!canvas)
+			return;
+		vector a = m_MapWidgetInstance.MapToScreen(Vector(it.rect[0], 0, it.rect[3]));
+		vector b = m_MapWidgetInstance.MapToScreen(Vector(it.rect[2], 0, it.rect[1]));
+		int yellow = 0xFFFFC107;
+		float x0 = a[0] - mx - 6;
+		float y0 = a[1] - my - 6;
+		float x1 = b[0] - mx + 6;
+		float y1 = b[1] - my + 6;
+		canvas.DrawLine(x0, y0, x1, y0, 3, yellow);
+		canvas.DrawLine(x1, y0, x1, y1, 3, yellow);
+		canvas.DrawLine(x1, y1, x0, y1, 3, yellow);
+		canvas.DrawLine(x0, y1, x0, y0, 3, yellow);
+	}
+
 	protected void MDT_ShowBar(array<string> scopes)
 	{
-		if (!m_MDT_BarText)
+		if (!m_MDT_BarStatus || !m_MDT_BarKeys)
 			return;
 		MDT_Options o = MDT_Opts();
 		string text;
-		if (!m_MDT_Drawing)
-			text = "D: draw on this map (needs a pen)";
+		if (m_MDT_Browse)
+		{
+			MDT_MineList list = MDT_Mine.s_List;
+			MDT_MineItem it = MDT_BrowseItem();
+			if (!it)
+				text = "MY DRAWINGS    none on this map";
+			else
+			{
+				string name = it.title;
+				if (it.kind == "marker")
+					name = "Marker " + it.text;
+				if (name == "")
+					name = "Untitled";
+				string state = "on the map";
+				if (it.status == "pending")
+					state = "waiting for approval (not on the map yet)";
+				else if (it.status == "rejected")
+					state = "rejected";
+				string seen = "everyone";
+				if (it.scope == "personal")
+					seen = "only you";
+				string until = "permanent";
+				if (it.expires != "")
+					until = "until " + it.expires.Substring(0, 10);
+				text = "MY DRAWINGS    " + (m_MDT_BrowseIdx + 1).ToString() + " / " + list.items.Count().ToString() + "    " + name + "    " + state + "    " + seen + "    " + until;
+			}
+		}
+		else if (!m_MDT_Drawing)
+			text = "Draw on this map with a pen from your inventory";
 		else
 		{
-			text = "DRAWING with the " + MDT_PenName() + " pen (D: stop)\n";
-			text += "Left mouse: draw    Z: undo    Backspace: clear\n";
-			text += "C: pen colour    W: line " + MDT_WIDTHS[m_MDT_Width] + " m\n";
-			string who = "everyone";
+			string who = "everyone sees it";
 			if (scopes.Count() > 0 && scopes[m_MDT_Scope] == "personal")
-				who = "only me";
-			string keep = "permanent";
+				who = "only you see it";
+			string keep = "kept permanently";
 			if (o.lifespans && m_MDT_Life >= 0 && m_MDT_Life < o.lifespans.Count() && o.lifespans[m_MDT_Life] > 0)
-				keep = o.lifespans[m_MDT_Life].ToString() + " days";
-			text += "G: shown to " + who + "    L: keep " + keep + "\n";
-			text += "Enter: send " + MDT_Draft.s_Strokes.Count() + " lines";
-			if (who == "everyone" || o.approvePersonal)
-				text += " for approval";
+				keep = "kept " + o.lifespans[m_MDT_Life].ToString() + " days";
+			text = "DRAWING    " + MDT_PenName() + " pen    " + MDT_WIDTHS[m_MDT_Width].ToString() + " m line    " + who + "    " + keep;
+			text += "    " + MDT_Draft.s_Strokes.Count().ToString() + " lines";
 		}
 		if (MDT_Draft.s_Status != "")
-			text += "\n" + MDT_Draft.s_Status;
-		m_MDT_BarText.SetText(text);
+			text += "      " + MDT_Draft.s_Status;
+		m_MDT_BarStatus.SetText(text);
+
+		int mode = 0;
+		if (m_MDT_Drawing)
+			mode = 1;
+		if (m_MDT_Browse)
+			mode = 2;
+		if (mode == m_MDT_BarMode)
+			return;
+		m_MDT_BarMode = mode;
+		Widget child = m_MDT_BarKeys.GetChildren();
+		while (child)
+		{
+			Widget next = child.GetSibling();
+			child.Unlink();
+			child = next;
+		}
+		if (mode == 0)
+		{
+			MDT_AddKey("D", "start drawing");
+			MDT_AddKey("X", "my drawings");
+		}
+		else if (mode == 2)
+		{
+			MDT_AddKey("Left  Right", "previous / next");
+			MDT_AddKey("Delete", "remove (press twice)");
+			MDT_AddKey("Right mouse", "move map");
+			MDT_AddKey("Wheel  + -", "zoom");
+			MDT_AddKey("X", "back");
+		}
+		else
+		{
+			MDT_AddKey("Left mouse", "draw");
+			MDT_AddKey("Right mouse", "move map");
+			MDT_AddKey("Wheel  + -", "zoom");
+			MDT_AddKey("Z", "undo");
+			MDT_AddKey("Backspace", "clear");
+			MDT_AddKey("C", "pen colour");
+			MDT_AddKey("W", "line width");
+			MDT_AddKey("G", "who sees it");
+			MDT_AddKey("L", "how long");
+			MDT_AddKey("Enter", "send");
+			MDT_AddKey("X", "my drawings");
+			MDT_AddKey("D", "stop");
+		}
+		m_MDT_BarKeys.Update();
 	}
+
+	// One hotkey in the bar: the key in bold gold, its description after it.
+	protected void MDT_AddKey(string key, string what)
+	{
+		TextWidget k = TextWidget.Cast(GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawkey.layout", m_MDT_BarKeys));
+		TextWidget d = TextWidget.Cast(GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawdesc.layout", m_MDT_BarKeys));
+		if (k)
+			k.SetText(key + " ");
+		if (d)
+			d.SetText(what + "      ");
+	}
+
 
 	// A canvas has no circle: four short bars at 45° steps, each 0.42 of the width thick, make an
 	// octagon as wide as the line. Thin lines need none.

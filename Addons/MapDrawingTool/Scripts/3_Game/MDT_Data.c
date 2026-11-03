@@ -15,6 +15,9 @@
 const int MDT_RPC_MANIFEST = 0x4D445402;
 const int MDT_RPC_SUBMIT = 0x4D445403;      // client -> server: an in-game drawing, in pieces
 const int MDT_RPC_RESULT = 0x4D445404;      // server -> client: what the web app said about it
+const int MDT_RPC_MINE_ASK = 0x4D445405;    // client -> server: list my submissions
+const int MDT_RPC_MINE = 0x4D445406;        // server -> client: that list, in pieces
+const int MDT_RPC_WITHDRAW = 0x4D445407;    // client -> server: remove one of mine (id)
 const int MDT_RPC_CHUNK = 1000;             // characters per RPC; 4000 arrived "String CORRUPTED" (646 was fine)
 const string MDT_PROFILE_DIR = "$profile:MapDrawingTool";
 const string MDT_CONFIG_FILE = "$profile:MapDrawingTool\\config.json";
@@ -119,11 +122,73 @@ class MDT_SubmitResult
 	string scope;
 }
 
+// One of the player's own submissions (X on the map): where it is and, for line drawings, its lines.
+class MDT_MineItem
+{
+	string id;
+	string kind;            // "layer" or "marker"
+	string title;
+	string text;            // marker label
+	string status;          // "pending", "approved" or "rejected"
+	string scope;
+	string expires;         // "" = permanent
+	string created;
+	ref array<float> rect;  // x0, z0, x1, z1 (metres)
+	ref array<ref MDT_Stroke> strokes;
+}
+
+// What the game server asks the web app about one player (ingame/mine, ingame/withdraw)
+class MDT_PlayerAsk
+{
+	string serverKey;
+	string steamId;
+	string id;
+}
+
+// The web app's answer to api/<mapId>/ingame/mine
+class MDT_MineList
+{
+	bool ok;
+	string error;
+	ref array<ref MDT_MineItem> items;
+}
+
 // Hooks between modules: PlayerBase (4_World) receives the RPCs, MissionServer (5_Mission) handles them.
 class MDT_Events
 {
 	// (Man player, PlayerIdentity sender, int index, int count, string text): a piece of an in-game drawing
 	static ref ScriptInvoker SubmitPiece = new ScriptInvoker();
+	// (Man player, PlayerIdentity sender): the player wants their list
+	static ref ScriptInvoker MineAsk = new ScriptInvoker();
+	// (Man player, PlayerIdentity sender, string id): the player removes one of theirs
+	static ref ScriptInvoker Withdraw = new ScriptInvoker();
+}
+
+// The player's own submissions as the server last sent them (client).
+class MDT_Mine
+{
+	static ref MDT_MineList s_List;
+	static int s_Received;              // bumps on every new list
+	protected static ref array<string> s_Pieces;
+
+	static void OnPiece(int index, int count, string text)
+	{
+		if (index == 0 || !s_Pieces)
+			s_Pieces = new array<string>;
+		s_Pieces.Insert(text);
+		if (s_Pieces.Count() < count)
+			return;
+		string json;
+		foreach (string piece : s_Pieces)
+			json += piece;
+		s_Pieces = null;
+		MDT_MineList list;
+		string error;
+		if (!JsonFileLoader<MDT_MineList>.LoadData(json, list, error) || !list)
+			return;
+		s_List = list;
+		s_Received++;
+	}
 }
 
 // The drawing a player is making in game (client). Kept here so it survives closing the map screen
@@ -136,10 +201,10 @@ class MDT_Draft
 
 	static void OnResult(bool ok, string message)
 	{
+		if (ok && s_Sending)
+			s_Strokes.Clear();                      // the drawing was sent (not a removal)
 		s_Sending = false;
 		s_Status = message;
-		if (ok)
-			s_Strokes.Clear();
 		string title = "Map drawing";
 		NotificationSystem.AddNotificationExtended(5, title, message, "set:dayz_gui image:icon_pin");
 	}

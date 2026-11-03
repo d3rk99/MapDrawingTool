@@ -12,6 +12,26 @@ modded class PlayerBase
 				MDT_Events.SubmitPiece.Invoke(this, sender, pIndex, pCount, piece);
 			return;
 		}
+		if (rpc_type == MDT_RPC_MINE_ASK && GetGame().IsServer())
+		{
+			MDT_Events.MineAsk.Invoke(this, sender);
+			return;
+		}
+		if (rpc_type == MDT_RPC_WITHDRAW && GetGame().IsServer())
+		{
+			string withdrawId;
+			if (ctx.Read(withdrawId))
+				MDT_Events.Withdraw.Invoke(this, sender, withdrawId);
+			return;
+		}
+		if (rpc_type == MDT_RPC_MINE && GetGame().IsClient())
+		{
+			int mIndex, mCount;
+			string mText;
+			if (ctx.Read(mIndex) && ctx.Read(mCount) && ctx.Read(mText) && mCount > 0 && mCount <= 500)
+				MDT_Mine.OnPiece(mIndex, mCount, mText);
+			return;
+		}
 		if (rpc_type == MDT_RPC_RESULT && GetGame().IsClient())
 		{
 			bool ok;

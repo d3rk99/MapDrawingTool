@@ -1,6 +1,6 @@
 # Builds the in-game feasibility test mod (never ships). See Test\README.md.
-# -Texture builds the paper map texture test (MapDrawingToolTexTest) instead.
-param([string]$Destination = "E:\DayZMods\Mods\@MapDrawingToolTest", [switch]$Texture)
+# -Texture builds the paper map texture test (MapDrawingToolTexTest) instead, -Board the map board test.
+param([string]$Destination = "E:\DayZMods\Mods\@MapDrawingToolTest", [switch]$Texture, [switch]$Board)
 $ErrorActionPreference = "Stop"
 $builder = "E:\Steam\steamapps\common\DayZ Tools\Bin\AddonBuilder\AddonBuilder.exe"
 $out = Join-Path $Destination "Addons"
@@ -8,6 +8,7 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 $addons = @(@{Name = 'MapDrawingToolTest'; Prefix = 'MapDrawingToolTest'},
             @{Name = 'MapDrawingToolTest_karta'; Prefix = 'DZ\structures\signs\Tourist\data'})
 if ($Texture) { $addons = @(@{Name = 'MapDrawingToolTexTest'; Prefix = 'MapDrawingToolTexTest'}) }
+if ($Board) { $addons = @(@{Name = 'MapDrawingToolBoardTest'; Prefix = 'MapDrawingToolBoardTest'}) }
 foreach ($addon in $addons) {
   $pbo = Join-Path $out ($addon.Name + '.pbo')
   $started = Get-Date

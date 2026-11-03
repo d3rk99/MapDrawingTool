@@ -1,0 +1,15 @@
+TextWidgetClass MDTDrawDesc {
+ ignorepointer 1
+ color 0.92 0.92 0.92 1
+ position 0 0
+ size 10 24
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ text ""
+ font "gui/fonts/Metron"
+ "exact text" 1
+ "exact text size" 18
+ "size to text h" 1
+}

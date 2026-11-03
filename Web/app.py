@@ -46,7 +46,7 @@ PAPER_DIR = os.path.join(REPO, "Build", "paper")              # <map id>/paper_<
 MAX_LAYER_BYTES = 8 * 1024 * 1024
 MAX_TEXT = 64
 ICON_COUNT = 20          # eMapMarkerTypes in vanilla scripts\5_mission\gui\mapmarkersinfo.c
-STATUSES = ("pending", "approved", "rejected")
+STATUSES = ("pending", "approved", "rejected")    # set by the owner; "withdrawn" is set by the author
 
 
 def load_config():
@@ -260,7 +260,7 @@ def api_image(map_id, sub_id):
     if sub.get("kind") != "layer":
         abort(404)
     u = access.user()
-    owner = u and u["provider"] == "steam" and sub.get("owner") == u["id"]
+    owner = u and sub.get("by") == f"{u['provider']}:{u['id']}"
     if (sub.get("status") != "approved" or is_personal(sub)) and not owner:
         require_admin()
     return send_file(os.path.join(path, sub["image"]), mimetype="image/png", max_age=0)
@@ -412,8 +412,8 @@ def api_admin_delete(map_id, sub_id):
     with write_lock:
         path = sub_dir(map_id, sub_id)
         sub = read_sub(path)
-        if sub.get("status") != "rejected":
-            return jsonify(error="Only rejected submissions can be deleted"), 400
+        if sub.get("status") not in ("rejected", "withdrawn"):
+            return jsonify(error="Only rejected or withdrawn submissions can be deleted"), 400
         shutil.rmtree(path)
     notify.send(CFG, "deleted", MAPS[map_id], public(sub), access.public_url() + "/admin")
     return jsonify(deleted=sub_id)
@@ -489,6 +489,116 @@ def api_live_part(map_id, sub_id, part):
     if text is None:
         abort(404)
     return app.response_class(text, mimetype="application/json")
+
+
+# ---------------------------------------------------------------- players' own submissions
+
+def mine_item(world, sub):
+    """One of a player's submissions for their list: status, scope, lifespan, where it is
+    ("rect" x0, z0, x1, z1 in metres) and, for line drawings, the lines (an in-game preview)."""
+    item = {k: sub[k] for k in ("id", "kind", "title", "status", "scope", "expires", "created", "text") if k in sub}
+    item.setdefault("scope", "global")
+    info = WORLDS[world]
+    if sub.get("kind") == "marker":
+        item["rect"] = [sub["x"] - 60, sub["z"] - 60, sub["x"] + 60, sub["z"] + 60]
+    elif sub.get("px"):
+        x0, z1 = live.tex_to_world(info, sub["px"][0], sub["px"][1])
+        x1, z0 = live.tex_to_world(info, sub["px"][2], sub["px"][3])
+        item["rect"] = [round(x0, 1), round(z0, 1), round(x1, 1), round(z1, 1)]
+        if sub.get("strokes"):
+            try:
+                item["strokes"] = live.strokes_to_world(info, sub["strokes"])
+            except ValueError:
+                pass
+    return item
+
+
+def my_subs(map_id, ident):
+    """The submissions this player made on this map, newest first (withdrawn ones left out)."""
+    mine = [s for s in all_subs(map_id) if s.get("by") == ident and s.get("status") != "withdrawn"]
+    return sorted(mine, key=lambda s: s.get("created", ""), reverse=True)
+
+
+def withdraw(map_id, world, sub_id, ident):
+    """The author takes a submission back: it leaves the game at once; the owner still sees it
+    (Rejected tab, "withdrawn") and can delete it for good."""
+    with write_lock:
+        path = sub_dir(map_id, sub_id)
+        sub = read_sub(path)
+        if sub.get("by") != ident:
+            return {"error": "That is not your submission"}, 403
+        if sub.get("status") == "withdrawn":
+            return {"error": "Already removed"}, 400
+        was_live = is_live(sub)
+        sub["status"] = "withdrawn"
+        sub["reviewed"] = now()
+        write_sub(path, sub)
+        if was_live and not is_personal(sub):
+            if sub.get("kind") == "marker":
+                export_markers(map_id)
+            else:
+                glob = [s for s in live_subs(map_id) if not is_personal(s)]
+                live.build_paper(world, glob, lambda sid: sub_dir(map_id, sid), os.path.join(PAPER_DIR, map_id))
+    notify.send(CFG, "withdrawn", MAPS[map_id], public(sub), access.public_url() + "/admin")
+    return {"ok": True, "id": sub_id}, 200
+
+
+def session_ident():
+    u = access.user()
+    return f"{u['provider']}:{u['id']}" if u else None
+
+
+@app.get("/api/<map_id>/mine")
+def api_mine(map_id):
+    """The signed-in player's own submissions on this map (the editor's My submissions)."""
+    map_id, world = map_or_404(map_id)
+    ident = session_ident()
+    if not ident:
+        return jsonify(error="Sign in to see your submissions"), 403
+    return jsonify([mine_item(world, s) for s in my_subs(map_id, ident)])
+
+
+@app.post("/api/<map_id>/mine/<sub_id>/withdraw")
+def api_mine_withdraw(map_id, sub_id):
+    map_id, world = map_or_404(map_id)
+    ident = session_ident()
+    if not ident:
+        return jsonify(error="Sign in first"), 403
+    result, code = withdraw(map_id, world, sub_id, ident)
+    return jsonify(result), code
+
+
+def server_player(body):
+    """The SteamID a game server vouches for, or None when its serverKey is wrong."""
+    key = CFG.get("serverKey") or ""
+    sid = str(body.get("steamId", ""))
+    if not key or not secrets.compare_digest(str(body.get("serverKey", "")), key) or not re.fullmatch(r"\d{17}", sid):
+        return None
+    return sid
+
+
+@app.post("/api/<map_id>/ingame/mine")
+def api_ingame_mine(map_id):
+    """A player's own submissions, asked for by the game server (the in-game list, X on the map)."""
+    map_id, world = map_or_404(map_id)
+    sid = server_player(request.get_json(silent=True) or {})
+    if not sid:
+        return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
+    return jsonify(ok=True, items=[mine_item(world, s) for s in my_subs(map_id, "steam:" + sid)][:50]), 200
+
+
+@app.post("/api/<map_id>/ingame/withdraw")
+def api_ingame_withdraw(map_id):
+    map_id, world = map_or_404(map_id)
+    body = request.get_json(silent=True) or {}
+    sid = server_player(body)
+    if not sid:
+        return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
+    sub_id = str(body.get("id", ""))
+    if not sub_id.replace("-", "").isalnum() or not os.path.isfile(os.path.join(SUBS, map_id, sub_id, "submission.json")):
+        return jsonify(ok=False, error="That drawing no longer exists"), 200
+    result, code = withdraw(map_id, world, sub_id, "steam:" + sid)
+    return jsonify({**result, "ok": code == 200}), 200
 
 
 @app.post("/api/<map_id>/ingame")

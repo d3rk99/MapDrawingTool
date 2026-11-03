@@ -85,3 +85,10 @@ pre.log { background: #000; padding: 10px; border-radius: 4px; max-height: 300px
 #settings .webhook { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; padding: 6px 10px; }
 #settings .rules { margin-top: 6px; }
 .gone { display: none !important; }
+
+/* editor: my submissions */
+.mine { display: flex; flex-direction: column; gap: 8px; }
+.mine-item { display: flex; gap: 8px; align-items: flex-start; }
+.mine-item canvas { width: 72px; height: 72px; border-radius: 4px; background: #000; flex: none; }
+.mine-item small { color: var(--muted); }
+.mine-item button { margin-top: 4px; padding: 2px 8px; }

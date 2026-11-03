@@ -5,7 +5,8 @@ const Settings = (() => {
   let data = null, roles = null, rolesError = "";
   const WHO = { anyone: "Anyone (types a name)", "signed-in": "Anyone signed in (Steam or Discord)",
     listed: "Only listed Steam accounts or Discord roles" };
-  const EVENTS = { submitted: "New submission", approved: "Approved", rejected: "Rejected", deleted: "Deleted" };
+  const EVENTS = { submitted: "New submission", approved: "Approved", rejected: "Rejected", deleted: "Deleted",
+    withdrawn: "Removed by its author" };
 
   function el(tag, attrs = {}, ...kids) {
     const e = document.createElement(tag);

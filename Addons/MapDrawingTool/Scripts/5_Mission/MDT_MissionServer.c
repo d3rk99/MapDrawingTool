@@ -70,6 +70,38 @@ class MDT_SubmitCallback : RestCallback
 	}
 }
 
+// The web app's answer about one player's list (MDT_RPC_MINE_ASK) or a removal (MDT_RPC_WITHDRAW).
+class MDT_MineCallback : RestCallback
+{
+	string m_Uid;
+	bool m_Withdraw;
+
+	void MDT_MineCallback(string uid, bool withdraw)
+	{
+		m_Uid = uid;
+		m_Withdraw = withdraw;
+	}
+
+	override void OnSuccess(string data, int dataSize)
+	{
+		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
+		if (mission)
+			mission.MDT_MineDone(this, data);
+	}
+
+	override void OnError(int errorCode)
+	{
+		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
+		if (mission)
+			mission.MDT_MineDone(this, "");
+	}
+
+	override void OnTimeout()
+	{
+		OnError(0);
+	}
+}
+
 modded class MissionServer
 {
 	static const int MDT_SUBMIT_COOLDOWN_MS = 10000;
@@ -85,6 +117,7 @@ modded class MissionServer
 	protected ref map<string, ref array<string>> m_MDT_Pieces = new map<string, ref array<string>>;
 	protected ref map<string, int> m_MDT_LastSubmit = new map<string, int>;
 	protected ref array<ref MDT_SubmitCallback> m_MDT_Waiting = new array<ref MDT_SubmitCallback>;
+	protected ref array<ref MDT_MineCallback> m_MDT_MineWaiting = new array<ref MDT_MineCallback>;
 
 	override void OnInit()
 	{
@@ -111,6 +144,8 @@ modded class MissionServer
 		MDT_Poll();
 		GetGame().GetCallQueue(CALL_CATEGORY_SYSTEM).CallLater(MDT_Poll, seconds * 1000, true);
 		MDT_Events.SubmitPiece.Insert(MDT_OnSubmitPiece);
+		MDT_Events.MineAsk.Insert(MDT_OnMineAsk);
+		MDT_Events.Withdraw.Insert(MDT_OnWithdraw);
 	}
 
 	override void InvokeOnConnect(PlayerBase player, PlayerIdentity identity)
@@ -359,6 +394,117 @@ modded class MissionServer
 		}
 		if (ok)
 			MDT_Poll();                                     // personal work without approval shows at once
+	}
+
+	// ---------------------------------------------------------------- a player's own submissions
+
+	void MDT_OnMineAsk(Man man, PlayerIdentity sender)
+	{
+		if (sender)
+			MDT_AskWebApp(sender.GetPlainId(), "", false);
+	}
+
+	void MDT_OnWithdraw(Man man, PlayerIdentity sender, string id)
+	{
+		if (sender && id != "")
+			MDT_AskWebApp(sender.GetPlainId(), id, true);
+	}
+
+	protected void MDT_AskWebApp(string uid, string id, bool withdraw)
+	{
+		if (m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		{
+			MDT_ReplyTo(uid, false, "This server is not set up for in-game drawing (serverKey)");
+			return;
+		}
+		RestApi api = GetRestApi();
+		if (!api)
+			api = CreateRestApi();
+		if (!api)
+			return;
+		MDT_PlayerAsk ask = new MDT_PlayerAsk();
+		ask.serverKey = m_MDT_Config.serverKey;
+		ask.steamId = uid;
+		ask.id = id;
+		string body, error;
+		JsonFileLoader<MDT_PlayerAsk>.MakeData(ask, body, error, false);
+		MDT_MineCallback cb = new MDT_MineCallback(uid, withdraw);
+		m_MDT_MineWaiting.Insert(cb);
+		RestContext ctx = api.GetRestContext(m_MDT_Config.liveUrl);
+		ctx.SetHeader("application/json");
+		string path = "/ingame/mine";
+		if (withdraw)
+			path = "/ingame/withdraw";
+		ctx.POST(cb, "api/" + m_MDT_Config.mapId + path, body);
+	}
+
+	void MDT_MineDone(MDT_MineCallback cb, string data)
+	{
+		m_MDT_MineWaiting.RemoveItem(cb);
+		if (data == "")
+		{
+			MDT_ReplyTo(cb.m_Uid, false, "The map web app could not be reached");
+			return;
+		}
+		if (cb.m_Withdraw)
+		{
+			MDT_SubmitResult result;
+			string error;
+			if (!JsonFileLoader<MDT_SubmitResult>.LoadData(data, result, error) || !result || !result.ok)
+			{
+				string why = "Could not remove it";
+				if (result && result.error != "")
+					why = result.error;
+				MDT_ReplyTo(cb.m_Uid, false, why);
+				return;
+			}
+			MDT_ReplyTo(cb.m_Uid, true, "Removed");
+			MDT_Poll();                                      // it leaves everyone's map
+			MDT_AskWebApp(cb.m_Uid, "", false);              // and the player's list
+			return;
+		}
+		// the list goes to the player as the web app wrote it
+		PlayerBase player;
+		PlayerIdentity identity;
+		if (!MDT_FindPlayer(cb.m_Uid, player, identity))
+			return;
+		int len = data.Length();
+		int count = Math.Max(1, (len + MDT_RPC_CHUNK - 1) / MDT_RPC_CHUNK);
+		if (count > 500)
+			return;
+		for (int i = 0; i < count; i++)
+		{
+			ScriptRPC rpc = new ScriptRPC();
+			rpc.Write(i);
+			rpc.Write(count);
+			rpc.Write(data.Substring(i * MDT_RPC_CHUNK, Math.Min(MDT_RPC_CHUNK, len - i * MDT_RPC_CHUNK)));
+			rpc.Send(player, MDT_RPC_MINE, true, identity);
+		}
+	}
+
+	protected bool MDT_FindPlayer(string uid, out PlayerBase player, out PlayerIdentity identity)
+	{
+		array<Man> players = new array<Man>;
+		GetGame().GetPlayers(players);
+		foreach (Man man : players)
+		{
+			PlayerBase pb = PlayerBase.Cast(man);
+			if (pb && pb.GetIdentity() && pb.GetIdentity().GetPlainId() == uid)
+			{
+				player = pb;
+				identity = pb.GetIdentity();
+				return true;
+			}
+		}
+		return false;
+	}
+
+	protected void MDT_ReplyTo(string uid, bool ok, string message)
+	{
+		PlayerBase player;
+		PlayerIdentity identity;
+		if (MDT_FindPlayer(uid, player, identity))
+			MDT_Reply(player, identity, ok, message);
 	}
 
 	protected void MDT_Reply(PlayerBase player, PlayerIdentity identity, bool ok, string message)

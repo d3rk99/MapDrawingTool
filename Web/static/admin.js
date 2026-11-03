@@ -38,7 +38,7 @@ async function open() {
 
 function render() {
   for (const s of ["pending", "approved", "rejected"])
-    $("count-" + s).textContent = `(${subs.filter((x) => x.status === s).length})`;
+    $("count-" + s).textContent = `(${subs.filter((x) => tabOf(x) === s).length})`;
   for (const b of $("tabs").children) b.classList.toggle("active", b.dataset.status === tab);
   const onSettings = tab === "settings";
   $("settings").hidden = !onSettings;
@@ -46,7 +46,7 @@ function render() {
   if (onSettings) return Settings.show($("settings"));
   const list = $("list");
   list.replaceChildren();
-  const shown = subs.filter((s) => s.status === tab && byId[s.map]).sort((a, b) => b.created.localeCompare(a.created));
+  const shown = subs.filter((s) => tabOf(s) === tab && byId[s.map]).sort((a, b) => b.created.localeCompare(a.created));
   if (!shown.length) { list.textContent = "Nothing here."; return; }
   if (tab === "pending") {
     const cards = document.createElement("div");
@@ -76,6 +76,9 @@ function render() {
   }
 }
 
+// withdrawn (taken back by its author) is listed with rejected
+const tabOf = (s) => (s.status === "withdrawn" ? "rejected" : s.status);
+
 function card(sub) {
   const m = byId[sub.map];
   const el = document.createElement("article");
@@ -83,7 +86,8 @@ function card(sub) {
   const badge = document.createElement("div");
   badge.className = "badge";
   // map, plus personal (only its author sees it) and drawn in game
-  badge.textContent = [m.name, sub.scope === "personal" ? "personal" : "", sub.source === "game" ? "drawn in game" : ""]
+  badge.textContent = [m.name, sub.scope === "personal" ? "personal" : "", sub.source === "game" ? "drawn in game" : "",
+    sub.status === "withdrawn" ? "withdrawn by author" : ""]
     .filter(Boolean).join(" · ");
   const c = document.createElement("canvas");
   c.width = c.height = 512;
@@ -109,10 +113,13 @@ function card(sub) {
   }
   const row = document.createElement("div");
   row.className = "row";
-  if (sub.status !== "approved") row.append(button("Approve", "ok", () => review(sub, "approved")));
-  if (sub.status !== "rejected") row.append(button(sub.status === "approved" ? "Revoke" : "Reject", "bad", () => review(sub, "rejected")));
-  if (sub.status !== "pending") row.append(button("Back to pending", "", () => review(sub, "pending")));
-  if (sub.status === "rejected") row.append(button("Delete", "bad", () => remove(sub)));
+  if (sub.status === "withdrawn") row.append(button("Delete", "bad", () => remove(sub)));
+  else {
+    if (sub.status !== "approved") row.append(button("Approve", "ok", () => review(sub, "approved")));
+    if (sub.status !== "rejected") row.append(button(sub.status === "approved" ? "Revoke" : "Reject", "bad", () => review(sub, "rejected")));
+    if (sub.status !== "pending") row.append(button("Back to pending", "", () => review(sub, "pending")));
+    if (sub.status === "rejected") row.append(button("Delete", "bad", () => remove(sub)));
+  }
   el.append(h, meta, row);
   return el;
 }

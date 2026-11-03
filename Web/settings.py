@@ -25,7 +25,7 @@ bp = Blueprint("settings", __name__)
 S = {}                       # cfg, maps, path, require_admin, app, public_url
 save_lock = threading.Lock()
 WHO = ("anyone", "signed-in", "listed")
-EVENTS = ("submitted", "approved", "rejected", "deleted")
+EVENTS = ("submitted", "approved", "rejected", "deleted", "withdrawn")
 
 
 def init(app, cfg, maps, config_path, require_admin, public_url):

@@ -1,0 +1,15 @@
+TextWidgetClass MDTDrawKey {
+ ignorepointer 1
+ color 1 0.82 0.3 1
+ position 0 0
+ size 10 24
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ text ""
+ font "gui/fonts/Metron-Bold"
+ "exact text" 1
+ "exact text size" 18
+ "size to text h" 1
+}
