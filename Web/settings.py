@@ -33,14 +33,24 @@ def init(app, cfg, maps, config_path, require_admin, public_url):
     app.register_blueprint(bp)
 
 
+def access_defaults():
+    import access
+    return dict(access.DEFAULT_RULES)
+
+
 def _hint(url):
     """A webhook URL shown without its token: host and the last 4 characters."""
     m = re.match(r"https?://([^/]+)", url or "")
     return f"{m.group(1) if m else '?'}/…{url[-4:]}" if url else ""
 
 
+RULE_KEYS = ("who", "steamIds", "discordRoles", "perHour", "maxPending", "allowGlobal", "allowPersonal",
+             "approvePersonal", "maxDays", "defaultDays", "ingame")
+FLAGS = ("allowGlobal", "allowPersonal", "approvePersonal", "ingame")
+
+
 def _rules_out(r):
-    return {k: r[k] for k in ("who", "steamIds", "discordRoles", "perHour", "maxPending") if k in r}
+    return {k: r[k] for k in RULE_KEYS if k in r}
 
 
 @bp.get("/api/admin/settings")
@@ -55,8 +65,8 @@ def get_settings():
                "discord": {"clientId": d.get("clientId", ""), "clientSecretSet": bool(d.get("clientSecret")),
                            "guildId": d.get("guildId", ""), "botTokenSet": bool(d.get("botToken"))},
                "discordRedirect": (S["public_url"]() or "<publicUrl>") + "/login/discord/return"},
-        submitters=_rules_out({**{"who": "anyone", "steamIds": [], "discordRoles": [], "perHour": 10, "maxPending": 20},
-                               **(cfg.get("submitters") or {})}),
+        submitters=_rules_out({**access_defaults(), **(cfg.get("submitters") or {})}),
+        serverKey=cfg.get("serverKey", ""),
         maps=[{"id": m["id"], "name": m["name"], "world": m["world"],
                "override": _rules_out((cfg.get("mapSubmitters") or {}).get(m["id"]) or {}) or None}
               for m in S["maps"].values()],
@@ -82,7 +92,10 @@ def _ids(values, pattern, what):
 
 
 def _rules_in(r, partial):
-    """Checks one set of submitter rules. partial: a map override may leave keys out."""
+    """Checks one set of submitter rules. partial: a map override may leave keys out; the defaults
+    may not, so missing keys there take the built-in default."""
+    if not partial:
+        r = {**access_defaults(), **r}
     out = {}
     if "who" in r or not partial:
         if r.get("who") not in WHO:
@@ -93,15 +106,24 @@ def _rules_in(r, partial):
         out["steamIds"] = _ids(r.get("steamIds"), r"(7656\d{13})", "SteamID (17 digits, starts 7656)")
     if "discordRoles" in r or not partial:
         out["discordRoles"] = _ids(r.get("discordRoles"), r"^(\d{15,21})$", "Discord role ID")
-    for key, label in (("perHour", "Submissions per hour"), ("maxPending", "Waiting at once")):
+    for key, label, low, high in (("perHour", "Submissions per hour", 1, 1000), ("maxPending", "Waiting at once", 1, 1000),
+                                  ("maxDays", "Longest lifespan (days)", 0, 3650),
+                                  ("defaultDays", "Default lifespan (days)", 0, 3650)):
         if key in r or not partial:
             try:
                 n = int(r.get(key))
             except (TypeError, ValueError):
                 raise Bad(f"{label}: a number")
-            if not 1 <= n <= 1000:
-                raise Bad(f"{label}: 1 to 1000")
+            if not low <= n <= high:
+                raise Bad(f"{label}: {low} to {high}")
             out[key] = n
+    for key in FLAGS:
+        if key in r or not partial:
+            out[key] = bool(r.get(key))
+    if out.get("maxDays") and (not out.get("defaultDays") or out["defaultDays"] > out["maxDays"]) and "defaultDays" in out:
+        raise Bad("Default lifespan: 1 day up to the longest lifespan (0 = permanent is not allowed with a limit)")
+    if "allowGlobal" in out and "allowPersonal" in out and not (out["allowGlobal"] or out["allowPersonal"]):
+        raise Bad("Allow global drawings, personal drawings or both")
     return out
 
 
@@ -171,6 +193,8 @@ def put_settings():
                     hook["secret"] = secret
                 hooks.append(hook)
             new["webhooks"] = hooks
+            if body.get("newServerKey"):
+                new["serverKey"] = secrets.token_urlsafe(18)
 
             tmp = S["path"] + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:

@@ -155,13 +155,13 @@ def build_paper(world, approved, sub_path_of, paper_dir):
             layers.append((os.path.join(sub_path_of(sub["id"]), sub["image"]), sub["px"]))
     if not layers:
         return None
+    # Named after the files' size and time, not their contents: this runs on every game server poll,
+    # for every player with personal drawings, and the 4096 px base images are 15-20 MB.
     hasher = hashlib.sha1()
-    with open(compose_layers.base_path(world), "rb") as f:
-        hasher.update(f.read())
-    for img_path, px in layers:
-        with open(img_path, "rb") as f:
-            hasher.update(f.read())
-        hasher.update(json.dumps(px).encode())
+    for path in [compose_layers.base_path(world)] + [img for img, _ in layers]:
+        st = os.stat(path)
+        hasher.update(f"{os.path.basename(path)}:{st.st_size}:{st.st_mtime_ns};".encode())
+    hasher.update(json.dumps([px for _, px in layers]).encode())
     name = "paper_" + hasher.hexdigest()[:16] + ".paa"
     paa = os.path.join(paper_dir, name)
     if not os.path.isfile(paa):
@@ -195,10 +195,9 @@ def json_part(paa, part):
     return json.dumps({"d": words}, separators=(",", ":"))
 
 
-def manifest(map_id, world, world_info, approved, sub_path_of, markers, paper_dir):
-    """What a game server relays to its players. "mapId" is the URL path clients download parts from."""
+def _layer_entries(world_info, subs, sub_path_of, query=""):
     layers = []
-    for sub in approved:
+    for sub in subs:
         if sub.get("kind") != "layer":
             continue
         entry = ensure_live(world_info, sub_path_of(sub["id"]), sub)
@@ -206,10 +205,83 @@ def manifest(map_id, world, world_info, approved, sub_path_of, markers, paper_di
             continue
         if "bytes" in entry:
             entry = {**entry, "parts": -(-entry["bytes"] // PART_BYTES)}    # live.json may predate PART_BYTES
+        if query:
+            entry = {**entry, "query": query}
         layers.append({"id": sub["id"], **entry})
-    body = {"mapId": map_id, "world": world, "markers": markers, "layers": layers}
-    paper = build_paper(world, approved, sub_path_of, paper_dir)
+    return layers
+
+
+def manifest(map_id, world, world_info, approved, sub_path_of, paper_dir, options, key_of):
+    """What a game server relays to its players. "mapId" is the URL path clients download parts from.
+
+    approved: approved, unexpired submissions. Global ones go to everyone. Personal ones are grouped
+    under "personal" by their author's SteamID; the game server sends each player only their own
+    (with a paper texture of the global layers plus theirs). Their download links carry "query",
+    k=<key_of(steam id)>, so knowing a SteamID is not enough to fetch someone's personal drawings."""
+    glob = [s for s in approved if s.get("scope", "global") != "personal"]
+    body = {"mapId": map_id, "world": world, "options": options,
+            "markers": [compose_layers.marker_entry(s) for s in glob if s.get("kind") == "marker"],
+            "layers": _layer_entries(world_info, glob, sub_path_of)}
+    paper = build_paper(world, glob, sub_path_of, paper_dir)
     if paper:
         body["paper"] = paper
+    owners = {}
+    for s in approved:
+        if s.get("scope") == "personal" and s.get("owner"):
+            owners.setdefault(s["owner"], []).append(s)
+    personal = []
+    for owner, mine in sorted(owners.items()):
+        key = key_of(owner)
+        entry = {"owner": owner,
+                 "markers": [compose_layers.marker_entry(s) for s in mine if s.get("kind") == "marker"],
+                 "layers": _layer_entries(world_info, mine, sub_path_of, "k=" + key)}
+        if any(s.get("kind") == "layer" for s in mine):
+            own_paper = build_paper(world, glob + mine, sub_path_of, os.path.join(paper_dir, "personal", owner))
+            if own_paper:
+                entry["paper"] = {**own_paper, "query": f"o={owner}&k={key}"}
+        personal.append(entry)
+    body["personal"] = personal
     body["version"] = hashlib.sha1(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
     return body
+
+
+def ingame_layer(world_info, strokes):
+    """A drawing made in game (strokes in world metres, as the game sends them) as the editor would
+    have sent it: (png bytes, px rect, editor strokes in texture px). None when it has no lines."""
+    from PIL import ImageDraw
+    size, ox, oy, sx, sy = _calib(world_info)
+    k = (sx + sy) / 2
+    lines = []
+    for st in strokes[:100]:
+        pts = st.get("points") or []
+        xy = [(ox + float(pts[i]) * sx, oy + (size - float(pts[i + 1])) * sy) for i in range(0, len(pts) - 1, 2)]
+        if not xy:
+            continue
+        argb = int(st.get("color", 0)) & 0xFFFFFFFF
+        a, r, g, b = argb >> 24 & 255, argb >> 16 & 255, argb >> 8 & 255, argb & 255
+        width = max(1.0, min(200.0, float(st.get("width", 20)) * k))
+        lines.append((xy, (r, g, b), a / 255 or 1.0, width))
+    if not lines:
+        return None
+    pad = max(w for *_, w in lines) / 2 + 2
+    x0 = int(min(x for xy, *_ in lines for x, _ in xy) - pad)
+    y0 = int(min(y for xy, *_ in lines for _, y in xy) - pad)
+    x1 = int(max(x for xy, *_ in lines for x, _ in xy) + pad) + 1
+    y1 = int(max(y for xy, *_ in lines for _, y in xy) + pad) + 1
+    img = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    editor = []
+    for xy, rgb, alpha, width in lines:
+        local = [(x - x0, y - y0) for x, y in xy]
+        colour = rgb + (round(alpha * 255),)
+        if len(local) > 1:
+            d.line(local, fill=colour, width=max(1, round(width)), joint="curve")
+        r = width / 2
+        for x, y in (local[0], local[-1]):
+            d.ellipse([x - r, y - r, x + r, y + r], fill=colour)
+        editor.append({"color": "#%02x%02x%02x" % rgb, "alpha": alpha, "width": width,
+                       "points": [[round(x, 1), round(y, 1)] for x, y in xy]})
+    import io
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue(), [x0, y0, x1, y1], editor

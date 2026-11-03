@@ -4,6 +4,22 @@ modded class PlayerBase
 	{
 		super.OnRPC(sender, rpc_type, ctx);
 
+		if (rpc_type == MDT_RPC_SUBMIT && GetGame().IsServer())
+		{
+			int pIndex, pCount;
+			string piece;
+			if (ctx.Read(pIndex) && ctx.Read(pCount) && ctx.Read(piece))
+				MDT_Events.SubmitPiece.Invoke(this, sender, pIndex, pCount, piece);
+			return;
+		}
+		if (rpc_type == MDT_RPC_RESULT && GetGame().IsClient())
+		{
+			bool ok;
+			string message;
+			if (ctx.Read(ok) && ctx.Read(message))
+				MDT_Draft.OnResult(ok, message);
+			return;
+		}
 		if (rpc_type != MDT_RPC_MANIFEST || !GetGame().IsClient())
 			return;
 

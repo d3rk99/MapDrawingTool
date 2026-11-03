@@ -62,6 +62,9 @@ def load_config():
     if not cfg.get("sessionSecret"):               # signs player sign-in cookies (access.py)
         cfg["sessionSecret"] = secrets.token_urlsafe(32)
         changed = True
+    if not cfg.get("serverKey"):                   # game servers send in-game drawings with it (api_ingame)
+        cfg["serverKey"] = secrets.token_urlsafe(18)
+        changed = True
     for hook in cfg.get("webhooks") or []:         # the admin page's Settings edits webhooks by id
         if not hook.get("id"):
             hook["id"] = secrets.token_hex(4)
@@ -151,14 +154,30 @@ def all_subs(map_id):
 
 def public(sub):
     keep = ("id", "kind", "status", "created", "author", "group", "title", "px", "x", "z", "text", "color", "icon",
-            "reviewed", "note")
+            "reviewed", "note", "scope", "expires", "source")
     return {k: sub[k] for k in keep if k in sub}
 
 
+def is_admin():
+    return secrets.compare_digest(request.headers.get("X-Admin-Token", ""), CFG["adminToken"])
+
+
 def require_admin():
-    token = request.headers.get("X-Admin-Token", "")
-    if not secrets.compare_digest(token, CFG["adminToken"]):
+    if not is_admin():
         abort(403)
+
+
+def is_live(sub):
+    """Approved and not past its lifespan."""
+    return sub.get("status") == "approved" and (not sub.get("expires") or sub["expires"] > now())
+
+
+def live_subs(map_id):
+    return [s for s in all_subs(map_id) if is_live(s)]
+
+
+def is_personal(sub):
+    return sub.get("scope") == "personal"
 
 
 def clean_text(value, limit=MAX_TEXT):
@@ -169,7 +188,7 @@ def export_markers(map_id):
     """Writes the approved markers for a map, the same file the build makes, and copies it to the
     map's serverProfileDir (the fallback for a game server without a liveUrl)."""
     root = os.path.join(SUBS, map_id)
-    subs = compose_layers.load_submissions(root) if os.path.isdir(root) else []
+    subs = [s for s in all_subs(map_id) if is_live(s) and not is_personal(s)]
     markers = [compose_layers.marker_entry(s) for s in subs if s.get("kind") == "marker"]
     text = json.dumps({"markers": markers}, indent=1)
     targets = [os.path.join(root, "markers.json")]
@@ -226,8 +245,11 @@ def api_maps():
 
 @app.get("/api/<map_id>/approved")
 def api_approved(map_id):
+    """What the editor shows: everyone's live global work, plus the signed-in Steam player's own personal work."""
     map_id, world = map_or_404(map_id)
-    return jsonify([public(s) for s in all_subs(map_id) if s.get("status") == "approved"])
+    u = access.user()
+    me = u["id"] if u and u["provider"] == "steam" else None
+    return jsonify([public(s) for s in live_subs(map_id) if not is_personal(s) or (me and s.get("owner") == me)])
 
 
 @app.get("/api/<map_id>/image/<sub_id>")
@@ -237,7 +259,9 @@ def api_image(map_id, sub_id):
     sub = read_sub(path)
     if sub.get("kind") != "layer":
         abort(404)
-    if sub.get("status") != "approved":
+    u = access.user()
+    owner = u and u["provider"] == "steam" and sub.get("owner") == u["id"]
+    if (sub.get("status") != "approved" or is_personal(sub)) and not owner:
         require_admin()
     return send_file(os.path.join(path, sub["image"]), mimetype="image/png", max_age=0)
 
@@ -245,18 +269,47 @@ def api_image(map_id, sub_id):
 @app.post("/api/<map_id>/submissions")
 def api_submit(map_id):
     map_id, world = map_or_404(map_id)
+    result, code = create_submission(map_id, world, request.get_json(silent=True) or {}, "session", "web")
+    return jsonify(result), code
+
+
+def create_submission(map_id, world, body, user, source):
+    """Checks and stores one submission. user: "session" (the web editor's signed-in player) or a
+    user dict (a drawing made in game). Returns (response dict, HTTP status)."""
     size = float(WORLDS[world]["size"])
-    allowed, why, ident = access.check(map_id)
+    allowed, why, ident = access.check(map_id, user)
     if not allowed:
-        return jsonify(error=why), 403 if ident is None else 429
-    body = request.get_json(silent=True) or {}
+        return {"error": why}, 403 if ident is None else 429
+    if user == "session":
+        user = access.user()
+    rules = access.rules(map_id)
     kind = body.get("kind")
-    user = access.user()
     author = user["name"] if user else clean_text(body.get("author"), 32)
     if not author:
-        return jsonify(error="Enter your name"), 400
-    sub = {"kind": kind, "status": "pending", "created": now(), "author": author, "by": ident,
-           "group": clean_text(body.get("group"), 32), "title": clean_text(body.get("title"))}
+        return {"error": "Enter your name"}, 400
+
+    # global (everyone) or personal (only its author; needs a SteamID, which the game knows)
+    scope = body.get("scope") or ("global" if rules["allowGlobal"] else "personal")
+    if scope not in ("global", "personal") or not rules["allowGlobal" if scope == "global" else "allowPersonal"]:
+        return {"error": f"{scope.capitalize()} drawings are not allowed on this map"}, 400
+    if scope == "personal" and not (user and user["provider"] == "steam"):
+        return {"error": "Personal drawings need Steam sign-in (the game knows players by their Steam account)"}, 400
+    try:
+        days = int(body.get("days", rules.get("defaultDays") or 0))
+    except (TypeError, ValueError):
+        return {"error": "Bad lifespan"}, 400
+    if days not in access.lifespans(rules):
+        return {"error": "That lifespan is not allowed on this map"}, 400
+    approve_now = scope == "personal" and not rules["approvePersonal"]
+    sub = {"kind": kind, "status": "approved" if approve_now else "pending", "created": now(), "author": author,
+           "by": ident, "group": clean_text(body.get("group"), 32), "title": clean_text(body.get("title")),
+           "scope": scope, "source": source}
+    if scope == "personal":
+        sub["owner"] = user["id"]
+    if approve_now:
+        sub["reviewed"] = now()
+    if days:
+        sub["expires"] = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     png = None
     if kind == "layer":
@@ -265,20 +318,20 @@ def api_submit(map_id):
             data = body["image"].split(",", 1)[1] if body["image"].startswith("data:") else body["image"]
             png = base64.b64decode(data, validate=True)
         except (KeyError, ValueError, TypeError, AttributeError):
-            return jsonify(error="Bad layer data"), 400
+            return {"error": "Bad layer data"}, 400
         if len(png) > MAX_LAYER_BYTES:
-            return jsonify(error="Drawing too large"), 400
+            return {"error": "Drawing too large"}, 400
         tw, th = texture_size(world)
         if not (0 <= x0 < x1 <= tw and 0 <= y0 < y1 <= th):
-            return jsonify(error="Drawing is outside the map"), 400
+            return {"error": "Drawing is outside the map"}, 400
         try:
             img = Image.open(io.BytesIO(png))
             img.verify()
             img = Image.open(io.BytesIO(png)).convert("RGBA")
         except Exception:
-            return jsonify(error="Not a PNG image"), 400
+            return {"error": "Not a PNG image"}, 400
         if img.size != (x1 - x0, y1 - y0) or img.getchannel("A").getbbox() is None:
-            return jsonify(error="Drawing is empty or the wrong size"), 400
+            return {"error": "Drawing is empty or the wrong size"}, 400
         buf = io.BytesIO()
         img.save(buf, "PNG", optimize=True)      # re-encode: never store what the browser sent as-is
         png = buf.getvalue()
@@ -299,7 +352,7 @@ def api_submit(map_id):
                 live.strokes_to_world(WORLDS[world], clean)        # checks the point limit
                 sub["strokes"] = clean
             except (KeyError, ValueError, TypeError):
-                return jsonify(error="Bad stroke data"), 400
+                return {"error": "Bad stroke data"}, 400
     elif kind == "marker":
         try:
             x, z = float(body["x"]), float(body["z"])
@@ -307,15 +360,15 @@ def api_submit(map_id):
             color = str(body.get("color", "#FFC00000"))
             compose_layers.argb(color)
         except (KeyError, ValueError, TypeError):
-            return jsonify(error="Bad marker data"), 400
+            return {"error": "Bad marker data"}, 400
         text = clean_text(body.get("text"))
         if not (0 <= x <= size and 0 <= z <= size) or not 0 <= icon < ICON_COUNT or not text:
-            return jsonify(error="Marker needs a label and a spot on the map"), 400
+            return {"error": "Marker needs a label and a spot on the map"}, 400
         if len(color.lstrip("#")) not in (6, 8):
-            return jsonify(error="Bad colour"), 400
+            return {"error": "Bad colour"}, 400
         sub.update(x=round(x, 1), z=round(z, 1), text=text, color=color, icon=icon)
     else:
-        return jsonify(error="Unknown kind"), 400
+        return {"error": "Unknown kind"}, 400
 
     with write_lock:
         sub_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
@@ -326,8 +379,11 @@ def api_submit(map_id):
             with open(os.path.join(path, "layer.png"), "wb") as f:
                 f.write(png)
         write_sub(path, sub)
-    notify.send(CFG, "submitted", MAPS[map_id], public(sub), access.public_url() + "/admin")
-    return jsonify(id=sub_id, status="pending")
+        if approve_now and png:
+            live.ensure_live(WORLDS[world], path, sub)
+    if not approve_now:              # personal work that skips approval is nothing for the owner to review
+        notify.send(CFG, "submitted", MAPS[map_id], public(sub), access.public_url() + "/admin")
+    return {"id": sub_id, "status": sub["status"], "scope": scope, "expires": sub.get("expires")}, 200
 
 
 # ---------------------------------------------------------------- admin API
@@ -382,9 +438,9 @@ def api_admin_review(map_id, sub_id):
         markers = export_markers(map_id) if sub.get("kind") == "marker" else None
         if sub.get("kind") == "layer" and status == "approved":
             live.ensure_live(WORLDS[world], path, sub)     # build the in-game copy now, not on a game server's poll
-        if sub.get("kind") == "layer":
-            approved = [s for s in all_subs(map_id) if s.get("status") == "approved"]
-            live.build_paper(world, approved, lambda sid: sub_dir(map_id, sid), os.path.join(PAPER_DIR, map_id))
+        if sub.get("kind") == "layer" and not is_personal(sub):
+            glob = [s for s in live_subs(map_id) if not is_personal(s)]
+            live.build_paper(world, glob, lambda sid: sub_dir(map_id, sid), os.path.join(PAPER_DIR, map_id))
     if status != before and status in ("approved", "rejected"):
         notify.send(CFG, status, MAPS[map_id], public(sub), access.public_url() + "/admin")
     return jsonify(status=status, liveMarkers=markers)
@@ -396,18 +452,24 @@ def api_admin_review(map_id, sub_id):
 def api_live(map_id):
     """Everything approved on this map, for game servers to relay to players (see live.py)."""
     map_id, world = map_or_404(map_id)
-    approved = [s for s in all_subs(map_id) if s.get("status") == "approved"]
-    markers = [compose_layers.marker_entry(s) for s in approved if s.get("kind") == "marker"]
     with write_lock:
-        body = live.manifest(map_id, world, WORLDS[world], approved, lambda sid: os.path.join(SUBS, map_id, sid),
-                             markers, os.path.join(PAPER_DIR, map_id))
+        body = live.manifest(map_id, world, WORLDS[world], live_subs(map_id), lambda sid: os.path.join(SUBS, map_id, sid),
+                             os.path.join(PAPER_DIR, map_id), access.options(map_id),
+                             lambda owner: access.personal_key(map_id, owner))
     return app.response_class(json.dumps(body, separators=(",", ":")), mimetype="application/json")
 
 
 @app.get("/api/<map_id>/live/paper/<int:part>")
 def api_live_paper(map_id, part):
+    """The map's paper texture, or with ?o=<steam id>&k=<key> that player's own (global + personal)."""
     map_id, world = map_or_404(map_id)
-    paa = live.paper_path(os.path.join(PAPER_DIR, map_id))
+    owner = request.args.get("o", "")
+    folder = os.path.join(PAPER_DIR, map_id)
+    if owner:
+        if not owner.isdigit() or not secrets.compare_digest(request.args.get("k", ""), access.personal_key(map_id, owner)):
+            abort(404)
+        folder = os.path.join(folder, "personal", owner)
+    paa = live.paper_path(folder)
     text = live.json_part(paa, part) if paa else None
     if text is None:
         abort(404)
@@ -418,12 +480,56 @@ def api_live_paper(map_id, part):
 def api_live_part(map_id, sub_id, part):
     map_id, world = map_or_404(map_id)
     path = sub_dir(map_id, sub_id)
-    if read_sub(path).get("status") != "approved" or not os.path.isfile(os.path.join(path, "live.paa")):
+    sub = read_sub(path)
+    if not is_live(sub) or not os.path.isfile(os.path.join(path, "live.paa")):
+        abort(404)
+    if is_personal(sub) and not secrets.compare_digest(request.args.get("k", ""), access.personal_key(map_id, sub.get("owner", ""))):
         abort(404)
     text = live.json_part(os.path.join(path, "live.paa"), part)
     if text is None:
         abort(404)
     return app.response_class(text, mimetype="application/json")
+
+
+@app.post("/api/<map_id>/ingame")
+def api_ingame(map_id):
+    """A drawing made in game with a map and a pen, relayed by the game server.
+
+    {"serverKey", "steamId", "name", "title", "scope", "days", "strokes": [{"color": ARGB int,
+    "width": metres, "points": [x, z, x, z, ...]}]}. serverKey (Settings > Game servers) proves it
+    comes from the owner's game server, which vouches for the player's SteamID. Always answers 200
+    with {"ok": ...}: the game only sees the body, not the HTTP status."""
+    map_id, world = map_or_404(map_id)
+    body = request.get_json(silent=True) or {}
+    key = CFG.get("serverKey") or ""
+    if not key or not secrets.compare_digest(str(body.get("serverKey", "")), key):
+        return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
+    if not access.rules(map_id)["ingame"]:
+        return jsonify(ok=False, error="Drawing in game is turned off on this map"), 200
+    sid = str(body.get("steamId", ""))
+    if not re.fullmatch(r"\d{17}", sid):
+        return jsonify(ok=False, error="Bad player id"), 200
+    made = live.ingame_layer(WORLDS[world], body.get("strokes") or [])
+    if not made:
+        return jsonify(ok=False, error="Nothing drawn"), 200
+    png, px, strokes = made
+    tw, th = texture_size(world)
+    px = [max(0, px[0]), max(0, px[1]), min(tw, px[2]), min(th, px[3])]
+    if px[0] >= px[2] or px[1] >= px[3]:
+        return jsonify(ok=False, error="The drawing is outside the map"), 200
+    if (px[2] - px[0], px[3] - px[1]) != Image.open(io.BytesIO(png)).size:
+        img = Image.open(io.BytesIO(png))
+        full = made[1]
+        img = img.crop((px[0] - full[0], px[1] - full[1], px[2] - full[0], px[3] - full[1]))
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        png = buf.getvalue()
+    user = {"provider": "steam", "id": sid, "name": clean_text(body.get("name"), 32) or "Steam " + sid}
+    result, code = create_submission(map_id, world, {
+        "kind": "layer", "title": clean_text(body.get("title")) or "Drawn in game", "px": px,
+        "image": base64.b64encode(png).decode(), "strokes": strokes, "scope": body.get("scope"),
+        "days": body.get("days")}, user, "game")
+    return jsonify(ok=code == 200, **result), 200
 
 
 @app.get("/api/admin/build")

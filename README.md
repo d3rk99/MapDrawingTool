@@ -28,6 +28,25 @@ Without a `maps` list there is one map per world, its id the world name. A serve
 for another world logs it and shows nothing (the drawings would land in the wrong places).
 Players pick the map in the editor; `http://.../?map=<id>` opens one directly.
 
+## Personal drawings, lifespans, drawing in game
+
+- **Global or personal.** A player picks who sees a drawing or marker: everyone, or only themselves
+  (their own map). Personal work belongs to a SteamID (Steam sign-in, or drawn in game). The game
+  server sends each player the global work plus their own; their paper map texture is built from
+  both (`Build\paper\<map>\personal\<steam id>`). Personal download links carry a key
+  (`access.personal_key`), so a public SteamID is not enough to fetch someone's drawings. The
+  owner can let personal work skip approval (`approvePersonal` off, the default).
+- **Lifespan.** Each submission can expire (`expires`); players pick 1, 3, 7, 14, 30, 90 days or
+  permanent, within the owner's `maxDays`, default `defaultDays`. Expired work drops out of the game.
+- **Drawing in game.** With a pen (any `Pen_ColorBase`) in the inventory, D on the full-screen map
+  starts drawing: left mouse draws in the pen's colour, Z undo, Backspace clear, C pen colour,
+  W width, G everyone / only me, L lifespan, Enter send. The client sends the strokes to the game
+  server (`MDT_RPC_SUBMIT`), which adds the player's SteamID and the `serverKey` from its
+  `profiles\MapDrawingTool\config.json` and posts them to `/api/<map>/ingame`. The web app renders
+  them into a normal layer submission (approval, webhooks, admin page as usual).
+- Per map in Settings: allow global / personal, personal needs approval, longest and default
+  lifespan, drawing in game. `serverKey` is on Settings > Game servers.
+
 ## How content reaches the game
 
 | Where | What shows | How it gets there | Workshop update |

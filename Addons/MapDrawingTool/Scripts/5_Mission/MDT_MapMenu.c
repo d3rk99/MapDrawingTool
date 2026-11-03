@@ -12,6 +12,22 @@ modded class MapMenu
 	protected ref array<ref MDT_Layer> m_MDT_ImageLayers = new array<ref MDT_Layer>;
 	protected int m_MDT_Seen = -1;
 
+	// Drawing in game: with a pen in the inventory, D on the full-screen map (see MDT_UpdateDrawing).
+	static const float MDT_WIDTHS[4] = {15, 30, 60, 120};      // line width, metres on the ground
+	static const int MDT_MAX_POINTS = 3000;
+	protected bool m_MDT_Drawing;
+	protected ref MDT_Stroke m_MDT_Current;                     // the line under the mouse
+	protected vector m_MDT_LockPos;
+	protected float m_MDT_LockScale;
+	protected float m_MDT_LastX, m_MDT_LastY;
+	protected ref array<string> m_MDT_Pens = new array<string>; // pens carried, by class name
+	protected int m_MDT_Pen;
+	protected int m_MDT_Width = 1;
+	protected int m_MDT_Scope;                                  // index into MDT_Scopes()
+	protected int m_MDT_Life = -1;                              // index into options.lifespans
+	protected Widget m_MDT_Bar;
+	protected TextWidget m_MDT_BarText;
+
 	override Widget Init()
 	{
 		Widget root = super.Init();
@@ -30,6 +46,13 @@ modded class MapMenu
 				m_MapWidgetInstance.AddUserMark(Vector(m.x, 0, m.z), m.text, m.color, MapMarkerTypes.GetMarkerTypeFromID(m.icon));
 		}
 		MDT_Refresh();
+		m_MDT_Bar = GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawbar.layout", layoutRoot);
+		if (m_MDT_Bar)
+		{
+			m_MDT_Bar.SetSort(1001);
+			m_MDT_BarText = TextWidget.Cast(m_MDT_Bar.FindAnyWidget("MDTDrawText"));
+			m_MDT_Bar.Show(false);
+		}
 		return root;
 	}
 
@@ -92,34 +115,302 @@ modded class MapMenu
 			if (layer.kind != "strokes" || !layer.strokes)
 				continue;
 			foreach (MDT_Stroke s : layer.strokes)
-			{
-				if (!s.points || s.points.Count() < 4)
-					continue;
-				CanvasWidget canvas = MDT_Canvas((s.color >> 24) & 0xFF);
-				if (!canvas)
-					continue;
-				int opaque = s.color | 0xFF000000;
-				float width = Math.Max(1, s.width * pxPerMetre);
-				float half = width * 0.5;
-				// zoomed out, points closer than half the line width to the last one are skipped
-				float minStep = Math.Max(3, half);
-				int last = s.points.Count() - 2;
-				vector p = m_MapWidgetInstance.MapToScreen(Vector(s.points[0], 0, s.points[1]));
-				MDT_Dot(canvas, p[0] - mx, p[1] - my, width, opaque);
-				for (int j = 2; j <= last; j += 2)
-				{
-					vector q = m_MapWidgetInstance.MapToScreen(Vector(s.points[j], 0, s.points[j + 1]));
-					float dx = q[0] - p[0];
-					float dy = q[1] - p[1];
-					if (j < last && dx * dx + dy * dy < minStep * minStep)
-						continue;
-					canvas.DrawLine(p[0] - mx, p[1] - my, q[0] - mx, q[1] - my, width, opaque);
-					// a round dot on every joint and end fills the corner gap without square tips
-					MDT_Dot(canvas, q[0] - mx, q[1] - my, width, opaque);
-					p = q;
-				}
-			}
+				MDT_DrawStroke(s, mx, my, pxPerMetre);
 		}
+		MDT_UpdateDrawing(mx, my, pxPerMetre);
+	}
+
+	protected void MDT_DrawStroke(MDT_Stroke s, float mx, float my, float pxPerMetre)
+	{
+		if (!s.points || s.points.Count() < 2)
+			return;
+		CanvasWidget canvas = MDT_Canvas((s.color >> 24) & 0xFF);
+		if (!canvas)
+			return;
+		int opaque = s.color | 0xFF000000;
+		float width = Math.Max(1, s.width * pxPerMetre);
+		float half = width * 0.5;
+		// zoomed out, points closer than half the line width to the last one are skipped
+		float minStep = Math.Max(3, half);
+		int last = s.points.Count() - 2;
+		vector p = m_MapWidgetInstance.MapToScreen(Vector(s.points[0], 0, s.points[1]));
+		MDT_Dot(canvas, p[0] - mx, p[1] - my, Math.Max(width, 4), opaque);
+		for (int j = 2; j <= last; j += 2)
+		{
+			vector q = m_MapWidgetInstance.MapToScreen(Vector(s.points[j], 0, s.points[j + 1]));
+			float dx = q[0] - p[0];
+			float dy = q[1] - p[1];
+			if (j < last && dx * dx + dy * dy < minStep * minStep)
+				continue;
+			canvas.DrawLine(p[0] - mx, p[1] - my, q[0] - mx, q[1] - my, width, opaque);
+			// a round dot on every joint and end fills the corner gap without square tips
+			MDT_Dot(canvas, q[0] - mx, q[1] - my, width, opaque);
+			p = q;
+		}
+	}
+
+	// ---------------------------------------------------------------- drawing in game
+	// Keys while the full-screen map is open (raw keys: the "map" input group is excluded here):
+	// D draw on/off, left mouse draws, Z undo, Backspace clear, C pen colour, W line width,
+	// G everyone / only me, L lifespan, Enter send. The map is held still while the mouse button is down.
+
+	protected MDT_Options MDT_Opts()
+	{
+		if (MDT_Live.s_Manifest)
+			return MDT_Live.s_Manifest.options;
+		return null;
+	}
+
+	protected array<string> MDT_Scopes()
+	{
+		array<string> list = new array<string>;
+		MDT_Options o = MDT_Opts();
+		if (o && o.allowGlobal)
+			list.Insert("global");
+		if (o && o.allowPersonal)
+			list.Insert("personal");
+		return list;
+	}
+
+	protected void MDT_FindPens()
+	{
+		m_MDT_Pens.Clear();
+		PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
+		if (!player)
+			return;
+		array<EntityAI> items = new array<EntityAI>;
+		player.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, items);
+		foreach (EntityAI item : items)
+		{
+			if (item && item.IsKindOf("Pen_ColorBase") && m_MDT_Pens.Find(item.GetType()) < 0)
+				m_MDT_Pens.Insert(item.GetType());
+		}
+		if (m_MDT_Pen >= m_MDT_Pens.Count())
+			m_MDT_Pen = 0;
+	}
+
+	protected int MDT_PenColor()
+	{
+		if (m_MDT_Pens.Count() == 0)
+			return 0xFF1E1E1E;
+		string pen = m_MDT_Pens[m_MDT_Pen];
+		if (pen == "Pen_Red")
+			return 0xFFC62828;
+		if (pen == "Pen_Green")
+			return 0xFF2E7D32;
+		if (pen == "Pen_Blue")
+			return 0xFF1F4FB8;
+		return 0xFF1E1E1E;
+	}
+
+	protected string MDT_PenName()
+	{
+		if (m_MDT_Pens.Count() == 0)
+			return "none";
+		string pen = m_MDT_Pens[m_MDT_Pen];
+		pen.Replace("Pen_", "");
+		return pen;
+	}
+
+	protected bool MDT_Key(int key)
+	{
+		if (!KeyState(key))
+			return false;
+		ClearKey(key);
+		return true;
+	}
+
+	protected int MDT_PointCount()
+	{
+		int n = 0;
+		foreach (MDT_Stroke s : MDT_Draft.s_Strokes)
+			n += s.points.Count() / 2;
+		if (m_MDT_Current)
+			n += m_MDT_Current.points.Count() / 2;
+		return n;
+	}
+
+	protected void MDT_UpdateDrawing(float mx, float my, float pxPerMetre)
+	{
+		MDT_Options o = MDT_Opts();
+		bool allowed = o && o.ingame;
+		if (m_MDT_Bar)
+			m_MDT_Bar.Show(allowed);
+		if (!allowed)
+			return;
+		array<string> scopes = MDT_Scopes();
+		if (m_MDT_Life < 0 && o.lifespans && o.lifespans.Count() > 0)
+			m_MDT_Life = Math.Max(0, o.lifespans.Find(o.defaultDays));
+
+		if (MDT_Key(KeyCode.KC_D))
+		{
+			MDT_FindPens();
+			if (m_MDT_Pens.Count() == 0)
+			{
+				m_MDT_Drawing = false;
+				MDT_Draft.s_Status = "You need a pen in your inventory to draw";
+			}
+			else
+				m_MDT_Drawing = !m_MDT_Drawing;
+		}
+		if (m_MDT_Drawing)
+		{
+			if (MDT_Key(KeyCode.KC_C))
+			{
+				MDT_FindPens();
+				if (m_MDT_Pens.Count() > 0)
+					m_MDT_Pen = (m_MDT_Pen + 1) % m_MDT_Pens.Count();
+			}
+			if (MDT_Key(KeyCode.KC_W))
+				m_MDT_Width = (m_MDT_Width + 1) % 4;
+			if (MDT_Key(KeyCode.KC_G) && scopes.Count() > 0)
+				m_MDT_Scope = (m_MDT_Scope + 1) % scopes.Count();
+			if (MDT_Key(KeyCode.KC_L) && o.lifespans && o.lifespans.Count() > 0)
+				m_MDT_Life = (m_MDT_Life + 1) % o.lifespans.Count();
+			if (MDT_Key(KeyCode.KC_Z) && MDT_Draft.s_Strokes.Count() > 0)
+				MDT_Draft.s_Strokes.Remove(MDT_Draft.s_Strokes.Count() - 1);
+			if (MDT_Key(KeyCode.KC_BACK))
+				MDT_Draft.s_Strokes.Clear();
+			if (MDT_Key(KeyCode.KC_RETURN))
+				MDT_SendDraft(scopes);
+			MDT_TrackMouse();
+		}
+		if (m_MDT_Scope >= scopes.Count())
+			m_MDT_Scope = 0;
+
+		foreach (MDT_Stroke s : MDT_Draft.s_Strokes)
+			MDT_DrawStroke(s, mx, my, pxPerMetre);
+		if (m_MDT_Current)
+			MDT_DrawStroke(m_MDT_Current, mx, my, pxPerMetre);
+		MDT_ShowBar(scopes);
+	}
+
+	// Left mouse down: adds points to the current line, and holds the map still (it would pan).
+	protected void MDT_TrackMouse()
+	{
+		int x, y;
+		GetMousePos(x, y);
+		bool down = (GetMouseState(MouseState.LEFT) & MB_PRESSED_MASK) != 0;
+		if (!down)
+		{
+			if (m_MDT_Current)
+			{
+				if (m_MDT_Current.points.Count() == 2)             // a click: a dot
+				{
+					m_MDT_Current.points.Insert(m_MDT_Current.points[0] + 0.5);
+					m_MDT_Current.points.Insert(m_MDT_Current.points[1]);
+				}
+				MDT_Draft.s_Strokes.Insert(m_MDT_Current);
+				m_MDT_Current = null;
+			}
+			return;
+		}
+		if (!m_MDT_Current)
+		{
+			if (MDT_PointCount() >= MDT_MAX_POINTS)
+			{
+				MDT_Draft.s_Status = "The drawing is full: send it, or undo some lines";
+				return;
+			}
+			m_MDT_Current = new MDT_Stroke();
+			m_MDT_Current.color = MDT_PenColor();
+			m_MDT_Current.width = MDT_WIDTHS[m_MDT_Width];
+			m_MDT_Current.points = new array<float>;
+			m_MDT_LockPos = m_MapWidgetInstance.GetMapPos();
+			m_MDT_LockScale = m_MapWidgetInstance.GetScale();
+			m_MDT_LastX = -1000;
+		}
+		else
+		{
+			MDT_HoldMap();
+		}
+		float dx = x - m_MDT_LastX;
+		float dy = y - m_MDT_LastY;
+		if (dx * dx + dy * dy < 16 || MDT_PointCount() >= MDT_MAX_POINTS)
+			return;
+		vector w = m_MapWidgetInstance.ScreenToMap(Vector(x, y, 0));
+		m_MDT_Current.points.Insert(Math.Round(w[0] * 10) / 10);
+		m_MDT_Current.points.Insert(Math.Round(w[2] * 10) / 10);
+		m_MDT_LastX = x;
+		m_MDT_LastY = y;
+	}
+
+	protected void MDT_HoldMap()
+	{
+		m_MapWidgetInstance.SetScale(m_MDT_LockScale);
+		m_MapWidgetInstance.SetMapPos(m_MDT_LockPos);
+	}
+
+	protected void MDT_SendDraft(array<string> scopes)
+	{
+		if (MDT_Draft.s_Sending)
+			return;
+		if (MDT_Draft.s_Strokes.Count() == 0)
+		{
+			MDT_Draft.s_Status = "Draw something first";
+			return;
+		}
+		if (scopes.Count() == 0)
+			return;
+		MDT_Options o = MDT_Opts();
+		MDT_Submit submit = new MDT_Submit();
+		submit.title = "Drawn in game";
+		submit.scope = scopes[m_MDT_Scope];
+		if (o.lifespans && m_MDT_Life >= 0 && m_MDT_Life < o.lifespans.Count())
+			submit.days = o.lifespans[m_MDT_Life];
+		foreach (MDT_Stroke s : MDT_Draft.s_Strokes)
+			submit.strokes.Insert(s);
+		string json, error;
+		JsonFileLoader<MDT_Submit>.MakeData(submit, json, error, false);
+		PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
+		if (!player)
+			return;
+		int len = json.Length();
+		int count = Math.Max(1, (len + MDT_RPC_CHUNK - 1) / MDT_RPC_CHUNK);
+		if (count > 200)
+		{
+			MDT_Draft.s_Status = "The drawing is too big; send it in parts";
+			return;
+		}
+		for (int i = 0; i < count; i++)
+		{
+			ScriptRPC rpc = new ScriptRPC();
+			rpc.Write(i);
+			rpc.Write(count);
+			rpc.Write(json.Substring(i * MDT_RPC_CHUNK, Math.Min(MDT_RPC_CHUNK, len - i * MDT_RPC_CHUNK)));
+			rpc.Send(player, MDT_RPC_SUBMIT, true, null);
+		}
+		MDT_Draft.s_Sending = true;
+		MDT_Draft.s_Status = "Sending...";
+	}
+
+	protected void MDT_ShowBar(array<string> scopes)
+	{
+		if (!m_MDT_BarText)
+			return;
+		MDT_Options o = MDT_Opts();
+		string text;
+		if (!m_MDT_Drawing)
+			text = "D: draw on this map (needs a pen)";
+		else
+		{
+			text = "DRAWING with the " + MDT_PenName() + " pen (D: stop)\n";
+			text += "Left mouse: draw    Z: undo    Backspace: clear\n";
+			text += "C: pen colour    W: line " + MDT_WIDTHS[m_MDT_Width] + " m\n";
+			string who = "everyone";
+			if (scopes.Count() > 0 && scopes[m_MDT_Scope] == "personal")
+				who = "only me";
+			string keep = "permanent";
+			if (o.lifespans && m_MDT_Life >= 0 && m_MDT_Life < o.lifespans.Count() && o.lifespans[m_MDT_Life] > 0)
+				keep = o.lifespans[m_MDT_Life].ToString() + " days";
+			text += "G: shown to " + who + "    L: keep " + keep + "\n";
+			text += "Enter: send " + MDT_Draft.s_Strokes.Count() + " lines";
+			if (who == "everyone" || o.approvePersonal)
+				text += " for approval";
+		}
+		if (MDT_Draft.s_Status != "")
+			text += "\n" + MDT_Draft.s_Status;
+		m_MDT_BarText.SetText(text);
 	}
 
 	// A canvas has no circle: four short bars at 45° steps, each 0.42 of the width thick, make an

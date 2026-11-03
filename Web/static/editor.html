@@ -62,6 +62,12 @@
     <label id="authorRow">Your name <input id="author" maxlength="32"></label>
     <label>Group / guild <input id="group" maxlength="32"></label>
     <label>Title <input id="title" maxlength="64" placeholder="Our territory"></label>
+    <label id="scopeRow">Who sees it <select id="scope">
+      <option value="global">Everyone on the server</option>
+      <option value="personal">Only me (my own map)</option>
+    </select></label>
+    <p id="scopeHint" class="hint" hidden></p>
+    <label id="daysRow">Keep it for <select id="days"></select></label>
     <button id="submit" class="primary">Submit drawing for approval</button>
     <p id="status" class="status" role="status"></p>
   </section>

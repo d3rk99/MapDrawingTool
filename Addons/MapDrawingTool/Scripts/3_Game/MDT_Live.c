@@ -264,7 +264,10 @@ class MDT_Live
 		string mapId = s_Manifest.mapId;
 		if (mapId == "")
 			mapId = s_Manifest.world;     // web apps from before maps
-		api.GetRestContext(s_Base).GET(s_Callback, "api/" + mapId + "/live/" + job.layer.id + "/" + job.part);
+		string url = "api/" + mapId + "/live/" + job.layer.id + "/" + job.part;
+		if (job.layer.query != "")
+			url += "?" + job.layer.query;               // personal work: the key only its owner gets
+		api.GetRestContext(s_Base).GET(s_Callback, url);
 	}
 
 	static void OnPart(string data)

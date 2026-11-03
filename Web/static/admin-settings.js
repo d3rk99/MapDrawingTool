@@ -39,6 +39,14 @@ const Settings = (() => {
     other.value = (r.discordRoles || []).filter((id) => !known.has(id)).join("\n");
     const perHour = el("input", { type: "number", min: 1, max: 1000, value: r.perHour });
     const maxPending = el("input", { type: "number", min: 1, max: 1000, value: r.maxPending });
+    const flag = (key, text) => {
+      const b = el("input", { type: "checkbox" }); b.checked = r[key] !== false && r[key] !== undefined ? !!r[key] : false;
+      const l = el("label", { class: "chip" }, b, el("span", { text })); l.key = key; return l;
+    };
+    const flags = [flag("allowGlobal", "Drawings everyone sees"), flag("allowPersonal", "Personal drawings (only the author sees them)"),
+      flag("approvePersonal", "Personal drawings need approval too"), flag("ingame", "Drawing in game with a map and a pen")];
+    const maxDays = el("input", { type: "number", min: 0, max: 3650, value: r.maxDays ?? 0 });
+    const defaultDays = el("input", { type: "number", min: 0, max: 3650, value: r.defaultDays ?? 0 });
     const listed = el("div", { class: "listed" },
       field("Steam accounts", steam),
       roles ? el("div", { class: "setting" }, el("span", { text: "Discord roles" }), el("div", { class: "roles" }, ...picks)) : null,
@@ -47,11 +55,16 @@ const Settings = (() => {
     const sync = () => { listed.hidden = who.value !== "listed"; };
     who.onchange = sync; sync();
     const box = el("div", { class: "rules" }, field("Who may submit", who), listed,
-      el("div", { class: "row" }, field("Submissions per hour", perHour), field("Waiting for approval at once", maxPending)));
+      el("div", { class: "row" }, field("Submissions per hour", perHour), field("Waiting for approval at once", maxPending)),
+      el("div", { class: "setting" }, el("span", { text: "What players may make" }), el("div", { class: "chips" }, ...flags)),
+      el("div", { class: "row" },
+        field("Longest lifespan (days)", maxDays, "0 = no limit, drawings may be permanent"),
+        field("Default lifespan (days)", defaultDays, "0 = permanent. Players pick from 1, 3, 7, 14, 30, 90 days within the limit.")));
     const lines = (t) => t.value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     box.get = () => ({ who: who.value, steamIds: lines(steam),
       discordRoles: [...picks.map((p) => p.querySelector("input")).filter((b) => b.checked).map((b) => b.value), ...lines(other)],
-      perHour: +perHour.value, maxPending: +maxPending.value });
+      perHour: +perHour.value, maxPending: +maxPending.value, maxDays: +maxDays.value, defaultDays: +defaultDays.value,
+      ...Object.fromEntries(flags.map((l) => [l.key, l.querySelector("input").checked])) });
     return box;
   }
 
@@ -127,6 +140,8 @@ const Settings = (() => {
       return sec;
     });
     const hookList = el("div", {}, ...data.webhooks.map(webhookRow));
+    const serverKey = el("input", { readonly: "", value: data.serverKey, onfocus: function () { this.select(); } });
+    const newKey = el("input", { type: "checkbox" });
     const status = el("p", { class: "status" });
     const save = el("button", { class: "primary", text: "Save settings", onclick: async () => {
       const clear = [];
@@ -136,7 +151,7 @@ const Settings = (() => {
         publicUrl: publicUrl.value.trim(),
         login: { steam: steamOn.checked, steamApiKey: steamKey.value.trim(), clear,
           discord: { clientId: clientId.value.trim(), clientSecret: clientSecret.value.trim(), guildId: guildId.value.trim(), botToken: botToken.value.trim() } },
-        submitters: defaults.get(),
+        submitters: defaults.get(), newServerKey: newKey.checked,
         mapSubmitters: Object.fromEntries(perMap.map((p) => p.get()).filter(Boolean)),
         webhooks: [...hookList.children].map((r) => r.get()),
       };
@@ -166,6 +181,10 @@ const Settings = (() => {
       el("section", { class: "panel" }, el("h3", { text: "Who may submit" }),
         el("p", { class: "hint", text: "The default for every map. Signed-in Discord players get their roles checked when they sign in." }), defaults,
         el("h4", { text: "Per map" }), ...perMap),
+      el("section", { class: "panel" }, el("h3", { text: "Game servers" }),
+        el("p", { class: "hint", text: "Drawings made in game reach the web app through your DayZ server. Put this key in each server's profiles\\MapDrawingTool\\config.json as \"serverKey\", next to liveUrl." }),
+        field("Server key", serverKey),
+        el("label", { class: "chip" }, newKey, el("span", { text: "Make a new key when saving (servers with the old key stop sending in-game drawings)" }))),
       el("section", { class: "panel" }, el("h3", { text: "Notifications" }),
         el("p", { class: "hint", text: "Discord: channel settings > Integrations > Webhooks > New Webhook > Copy Webhook URL." }),
         hookList, el("button", { type: "button", text: "Add webhook", onclick: () => hookList.append(webhookRow({ format: "discord", events: ["submitted"] })) })),

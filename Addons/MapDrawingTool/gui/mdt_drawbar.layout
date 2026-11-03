@@ -1,0 +1,30 @@
+PanelWidgetClass MDTDrawBar {
+ ignorepointer 1
+ color 0 0 0 0.75
+ position 24 96
+ size 430 210
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ style rover_sim_colorable
+ {
+  MultilineTextWidgetClass MDTDrawText {
+   ignorepointer 1
+   color 1 1 1 1
+   position 12 10
+   size 406 190
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   text ""
+   font "gui/fonts/sdf_MetronLight72"
+   "exact text" 1
+   "exact text size" 18
+   "size to text h" 0
+   "size to text v" 0
+   wrap 1
+  }
+ }
+}

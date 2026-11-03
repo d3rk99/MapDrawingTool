@@ -19,7 +19,13 @@ Web/config.json:
     "steamIds": ["7656..."],               "listed": these SteamIDs may submit
     "discordRoles": ["1234..."],           "listed": members with any of these role IDs may submit
     "perHour": 10,                         submissions per player (or per address when anyone may) per hour
-    "maxPending": 20                       waiting for approval per player at once
+    "maxPending": 20,                      waiting for approval per player at once
+    "allowGlobal": true,                   drawings everyone on the server sees
+    "allowPersonal": true,                 drawings only their author sees (needs a SteamID: Steam
+                                           sign-in, or drawn in game)
+    "approvePersonal": false,              personal drawings wait for approval too
+    "maxDays": 0, "defaultDays": 0,        lifespan in days (0 = no limit / permanent)
+    "ingame": true                         players with a map and a pen can draw in game
   }
 
 All of this can be set on the admin page (Settings), which writes config.json (settings.py).
@@ -29,6 +35,8 @@ their roles in guildId. Role IDs: Discord settings > Advanced > Developer Mode, 
 the role > Copy Role ID. The roles are read at sign-in, so a role change applies on the next sign-in.
 """
 import datetime
+import hashlib
+import hmac
 import html
 import json
 import re
@@ -43,7 +51,10 @@ CFG = {}
 MAPS = {}
 SUBS_OF = None                   # callable: map id -> that map's submissions
 
-DEFAULT_RULES = {"who": "anyone", "steamIds": [], "discordRoles": [], "perHour": 10, "maxPending": 20}
+DEFAULT_RULES = {"who": "anyone", "steamIds": [], "discordRoles": [], "perHour": 10, "maxPending": 20,
+                 "allowGlobal": True, "allowPersonal": True, "approvePersonal": False, "maxDays": 0,
+                 "defaultDays": 0, "ingame": True}
+LIFESPANS = (1, 3, 7, 14, 30, 90, 0)       # days offered to players; 0 = permanent
 STEAM_OPENID = "https://steamcommunity.com/openid/login"
 DISCORD_API = "https://discord.com/api/v10"
 
@@ -91,11 +102,40 @@ def user():
     return session.get("user")
 
 
-def check(map_id):
-    """(allowed, reason, identity) for submitting on this map now. identity is "steam:<id>",
-    "discord:<id>" or "ip:<address>"."""
+def lifespans(r):
+    """The lifespans (days, 0 = permanent) players may pick under these rules."""
+    top = int(r.get("maxDays") or 0)
+    out = [d for d in LIFESPANS if (d and (not top or d <= top)) or (not d and not top)]
+    if top and top not in out:
+        out.append(top)
+    default = int(r.get("defaultDays") or 0)
+    if default not in out and (not top or 0 < default <= top):
+        out.append(default)
+    return sorted(out, key=lambda d: d or 10 ** 6)
+
+
+def options(map_id):
+    """What players may choose on this map (sent to the editor and, in the manifest, to the game)."""
     r = rules(map_id)
-    u = user()
+    spans = lifespans(r)
+    default = int(r.get("defaultDays") or 0)
+    return {"allowGlobal": bool(r["allowGlobal"]), "allowPersonal": bool(r["allowPersonal"]),
+            "approvePersonal": bool(r["approvePersonal"]), "ingame": bool(r["ingame"]), "lifespans": spans,
+            "defaultDays": default if default in spans else spans[0]}
+
+
+def personal_key(map_id, steam_id):
+    """Unguessable part of a player's personal download links (SteamIDs are public)."""
+    return hmac.new(CFG["sessionSecret"].encode(), f"{map_id}:{steam_id}".encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def check(map_id, u="session", ip=None):
+    """(allowed, reason, identity) for submitting on this map now. identity is "steam:<id>",
+    "discord:<id>" or "ip:<address>". u: the signed-in user (default: this request's session), or a
+    user dict for a submission made in game (the game server vouches for the SteamID)."""
+    r = rules(map_id)
+    if u == "session":
+        u = user()
     if r["who"] != "anyone" and not u:
         return False, "Sign in to submit on this map.", None
     if r["who"] == "listed":
@@ -103,7 +143,7 @@ def check(map_id):
              (u["provider"] == "discord" and set(u.get("roles", [])) & {str(x) for x in r["discordRoles"]})
         if not ok:
             return False, "Your account is not on this map's list of submitters. Ask the server owner.", None
-    ident = f"{u['provider']}:{u['id']}" if u else "ip:" + (request.remote_addr or "?")
+    ident = f"{u['provider']}:{u['id']}" if u else "ip:" + (ip or (request.remote_addr if has_request_context() else "?"))
     since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     mine = [s for m in MAPS for s in SUBS_OF(m) if s.get("by") == ident]
     if sum(1 for s in mine if s.get("created", "") >= since) >= int(r["perHour"]):
@@ -119,7 +159,8 @@ def api_me():
     map_id = request.args.get("map", "")
     ok, why, _ = check(map_id) if map_id in MAPS else (False, "Unknown map", None)
     r = rules(map_id) if map_id in MAPS else DEFAULT_RULES
-    return jsonify(user=user(), providers=providers(), canSubmit=ok, why=why, who=r["who"])
+    return jsonify(user=user(), providers=providers(), canSubmit=ok, why=why, who=r["who"],
+                   options=options(map_id) if map_id in MAPS else None)
 
 
 @bp.post("/logout")

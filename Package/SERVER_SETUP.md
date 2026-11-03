@@ -46,10 +46,12 @@ Then on **Settings > Web address** enter that public address and save.
 Edit `profiles\MapDrawingTool\config.json` on the DayZ server and restart it:
 
 ```json
-{ "liveUrl": "https://map.yourdomain.com/", "mapId": "chernarusplus", "pollSeconds": 60 }
+{ "liveUrl": "https://map.yourdomain.com/", "mapId": "chernarusplus", "serverKey": "...", "pollSeconds": 60 }
 ```
 
 - `liveUrl`: the public address from step 3.
+- `serverKey`: copy it from the web app's Settings > Game servers. Without it, players can't send
+  drawings made in game (everything else still works).
 - `mapId`: which map's drawings this server shows. Empty = the server's own world
   (`chernarusplus`, `enoch`, `sakhal`, `nasdara`). Two servers with the same `mapId` share drawings.
 
@@ -77,6 +79,13 @@ approve on `/admin`. Approved work appears in game within a minute or two, no re
   in Settings, paste its ID and secret and your Discord server ID. Then choose anyone / signed in /
   only listed Steam accounts or Discord roles, per map if you like.
 - **Notifications:** Settings > Notifications, paste a Discord webhook, tick "New submission".
+- **Personal drawings:** players can keep drawings to themselves (only they see them, on their own
+  map). Needs Steam sign-in on the web, or drawing in game. Settings decides whether personal work
+  needs your approval (off by default) or is allowed at all, per map.
+- **Lifespan:** players choose how long a drawing stays (1 day up to permanent); you set the longest
+  and the default in Settings.
+- **Drawing in game:** players with a map and a pen press M, then D, and draw with the mouse;
+  Enter sends it to you for approval (or straight to their own map if personal). Needs `serverKey`.
 
 ## Updating
 

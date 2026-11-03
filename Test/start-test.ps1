@@ -31,7 +31,9 @@ $text += "`r`nsteamQueryPort = $($Port + 25000);`r`n"
 if ($Map) {
   $mdt = Join-Path $ProfileRoot 'Server\MapDrawingTool'
   New-Item -ItemType Directory -Force -Path $mdt | Out-Null
-  "{`"liveUrl`":`"http://127.0.0.1:8640/`",`"mapId`":`"$Map`",`"pollSeconds`":30}" | Set-Content -LiteralPath (Join-Path $mdt 'config.json') -Encoding ASCII
+  # the web app's serverKey (Settings > Game servers) so in-game drawings reach it
+  $key = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Web\config.json') -Raw | ConvertFrom-Json).serverKey
+  "{`"liveUrl`":`"http://127.0.0.1:8640/`",`"mapId`":`"$Map`",`"serverKey`":`"$key`",`"pollSeconds`":30}" | Set-Content -LiteralPath (Join-Path $mdt 'config.json') -Encoding ASCII
 }
 # mdttest.<world> = dayzOffline.<world> with cfggameplay.json "use3DMap": true and a paper map at spawn
 # (the unfolded map stays in hand; M toggles the full-screen map). The file only loads with enableCfgGameplayFile.

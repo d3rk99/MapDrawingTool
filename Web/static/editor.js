@@ -388,11 +388,11 @@ $("popupOk").onclick = async () => {
   const m = state.pendingMarker;
   if (!m) return;
   try {
-    await MDT.api(`/api/${state.world}/submissions`, {
+    const sent = await MDT.api(`/api/${state.world}/submissions`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "marker", ...m, ...who(), title: "" }),
     });
-    say(`Marker "${m.text}" sent for approval.`);
+    say(sent.status === "approved" ? `Marker "${m.text}" added to your own map.` : `Marker "${m.text}" sent for approval.`);
   } catch (err) { say(err.message, true); }
   refreshAccount();
   hidePopup(); draw();
@@ -402,8 +402,34 @@ $("popupOk").onclick = async () => {
 function who() {
   const author = $("author").value.trim();
   try { localStorage.setItem("mdt.author", author); localStorage.setItem("mdt.group", $("group").value.trim()); } catch {}
-  return { author, group: $("group").value.trim(), title: $("title").value.trim() };
+  return { author, group: $("group").value.trim(), title: $("title").value.trim(),
+    scope: $("scope").value, days: +$("days").value };
 }
+
+const daysLabel = (d) => (d === 0 ? "Permanent" : d === 1 ? "1 day" : `${d} days`);
+
+// Who sees it (everyone / only me) and how long, as the owner allows on this map (Web/access.py).
+// Personal drawings belong to a Steam account: the game shows them to that player only.
+function showOptions(me) {
+  const o = me.options || { allowGlobal: true, allowPersonal: false, lifespans: [0], defaultDays: 0 };
+  const steam = me.user && me.user.provider === "steam";
+  const [glob, pers] = $("scope").options;
+  glob.disabled = !o.allowGlobal;
+  pers.disabled = !o.allowPersonal || !steam;
+  if ($("scope").selectedOptions[0]?.disabled) $("scope").value = o.allowGlobal ? "global" : "personal";
+  $("scopeRow").hidden = !(o.allowGlobal && o.allowPersonal);
+  const hint = !o.allowPersonal ? "" : !steam ? "Sign in with Steam to keep drawings on your own map only."
+    : $("scope").value === "personal" ? (o.approvePersonal ? "Only you will see it, after the owner approves it."
+      : "Only you will see it. It goes straight to your map, no approval needed.") : "";
+  $("scopeHint").textContent = hint;
+  $("scopeHint").hidden = !hint;
+  const keep = +$("days").value;
+  $("days").replaceChildren(...o.lifespans.map((d) => new Option(daysLabel(d), d)));
+  $("days").value = o.lifespans.includes(keep) && $("days").dataset.touched ? keep : o.defaultDays;
+  $("daysRow").hidden = o.lifespans.length < 2;
+}
+$("days").onchange = () => { $("days").dataset.touched = "1"; };
+$("scope").onchange = () => { if (state.me) showOptions(state.me); };
 
 function draftBounds() {
   const { width: w, height: h } = state.draft;
@@ -445,6 +471,7 @@ async function refreshAccount() {
     return a;
   })));
   $("authorRow").hidden = !!me.user;
+  showOptions(me);
   $("access").hidden = me.canSubmit;
   $("access").textContent = me.why;
   $("submit").disabled = !me.canSubmit;
@@ -463,11 +490,12 @@ $("submit").onclick = async () => {
   $("submit").disabled = true;
   say("Sending...");
   try {
-    await MDT.api(`/api/${state.world}/submissions`, {
+    const sent = await MDT.api(`/api/${state.world}/submissions`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "layer", image: crop.toDataURL("image/png"), px: [x0, y0, x1, y1], strokes: liveStrokes(), ...meta }),
     });
-    say("Drawing sent. It appears in game within a minute or two of the owner approving it.");
+    say(sent.status === "approved" ? "Saved to your own map. It appears in game within a minute or two."
+      : "Drawing sent. It appears in game within a minute or two of the owner approving it.");
     state.ops = []; state.redo = []; rebuildDraft();
   } catch (err) {
     say(err.message, true);

@@ -82,7 +82,9 @@ function card(sub) {
   el.className = "card";
   const badge = document.createElement("div");
   badge.className = "badge";
-  badge.textContent = m.name;
+  // map, plus personal (only its author sees it) and drawn in game
+  badge.textContent = [m.name, sub.scope === "personal" ? "personal" : "", sub.source === "game" ? "drawn in game" : ""]
+    .filter(Boolean).join(" · ");
   const c = document.createElement("canvas");
   c.width = c.height = 512;
   el.append(badge, c);
@@ -93,7 +95,9 @@ function card(sub) {
   meta.className = "meta";
   const where = sub.kind === "marker" ? `X ${Math.round(sub.x)} Z ${Math.round(sub.z)}`
     : `${sub.px[2] - sub.px[0]}×${sub.px[3] - sub.px[1]} px on the map texture`;
-  meta.textContent = `${sub.author}${sub.group ? " · " + sub.group : ""} · ${sub.created.replace("T", " ").slice(0, 16)} · ${where}`;
+  const life = !sub.expires ? "" : sub.expires < new Date().toISOString() ? " · expired"
+    : ` · until ${sub.expires.replace("T", " ").slice(0, 16)}`;
+  meta.textContent = `${sub.author}${sub.group ? " · " + sub.group : ""} · ${sub.created.replace("T", " ").slice(0, 16)} · ${where}${life}`;
   // who sent it: a Steam profile link, a Discord user id, or (anyone may submit) an address
   if (sub.by) {
     const [kind, id] = [sub.by.slice(0, sub.by.indexOf(":")), sub.by.slice(sub.by.indexOf(":") + 1)];
