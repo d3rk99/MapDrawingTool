@@ -98,7 +98,11 @@ python -m pip install -r Web\requirements.txt
 python -I Web\app.py
 ```
 
-The server owner's setup guide is the Workshop description, `Workshop\description.txt`.
+Server owners get the web app as a zip (`python -I Tools\package_webapp.py` builds
+`Build\release\MapDrawingTool-WebApp-<version>.zip`) with `setup.bat`, `start.bat` and
+`Package\SERVER_SETUP.md`, their setup guide. The Workshop description is `Workshop\description.txt`.
+DayZ and DayZ Tools are found through Steam (`Tools\paths.py`); `dayzPath` / `imageToPaa` in
+`Web\config.json` override.
 
 - `http://127.0.0.1:8640/` — player editor on the real map texture: brush, eraser, stamps
   (9 built in, or upload a PNG), painted text, undo/redo, live markers with the 20 in-game icons.

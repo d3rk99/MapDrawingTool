@@ -3,8 +3,9 @@ web app paints approved drawings onto.
 
 Usage: python -I make_basemap.py <world> [source.paa]
 
-Default source is the world's "texture.source" in worlds.json: a game PBO, with "entry" the PAA
-inside it (Sakhal and Nasdara ship only in the game's DLC folders, not on the P: drive), or a PAA.
+Default source is the world's "texture.source" in worlds.json: a PBO inside the DayZ game or
+server install (found through Steam, see paths.py), with "entry" the PAA inside it. Sakhal and
+Nasdara come from their DLC folders. A world whose files are not installed is skipped (exit 2).
 Pass another PAA to start from a customised map, e.g. Memento Mori's MMmap karta_co.paa.
 Writes Web/static/maps/<world>.png (what gets painted on) and <world>.jpg (what the editor shows).
 
@@ -21,11 +22,12 @@ import tempfile
 
 from PIL import Image
 
-import pbo
-
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)     # python -I leaves the script's own folder off the path
+import paths  # noqa: E402
+import pbo  # noqa: E402
+
 REPO = os.path.dirname(HERE)
-TO_PAA = r"E:\Steam\steamapps\common\DayZ Tools\Bin\ImageToPAA\ImageToPAA.exe"
 
 
 def main():
@@ -34,7 +36,10 @@ def main():
     world = sys.argv[1].lower()
     with open(os.path.join(HERE, "worlds.json"), encoding="utf-8") as f:
         tex = json.load(f)[world]["texture"]
-    source = sys.argv[2] if len(sys.argv) > 2 else tex["source"]
+    source = sys.argv[2] if len(sys.argv) > 2 else paths.find_in_dayz(tex["source"])
+    if not source:
+        print(f"{world}: {tex['source']} not found in a DayZ or DayZ Server install, skipped")
+        sys.exit(2)
     out = os.path.join(REPO, "Web", "static", "maps", world + ".png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
@@ -50,7 +55,7 @@ def main():
                 f.write(data[offset:offset + datasize])
             source = paa
         png = os.path.join(tmp, "base.png")
-        subprocess.run([TO_PAA, source, png], check=True, capture_output=True)
+        subprocess.run([paths.image_to_paa(), source, png], check=True, capture_output=True)
         img = Image.open(png).convert("RGB")
         img.save(out, optimize=True)
         img.save(out[:-4] + ".jpg", quality=90)   # lighter copy the editor shows

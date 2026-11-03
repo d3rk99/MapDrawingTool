@@ -429,7 +429,8 @@ def api_live_part(map_id, sub_id, part):
 @app.get("/api/admin/build")
 def api_build_status():
     require_admin()
-    return jsonify(build_state)
+    # the release package has no build script (baking needs DayZ Tools' AddonBuilder and the mod's key)
+    return jsonify({**build_state, "available": os.path.isfile(os.path.join(TOOLS, "build-mod.ps1"))})
 
 
 @app.post("/api/admin/build")

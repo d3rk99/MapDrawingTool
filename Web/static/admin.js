@@ -189,6 +189,7 @@ async function pollBuild() {
   clearTimeout(pollTimer);
   try {
     const st = await adminApi("/api/admin/build");
+    if (!st.available) { $("buildSection").classList.add("gone"); return; }
     $("build").disabled = st.running;
     $("buildLog").textContent = st.log ? `${st.running ? "Running" : st.ok ? "OK" : "FAILED"} ${st.finished || ""}\n\n${st.log}` : "No build yet.";
     if (st.running) pollTimer = setTimeout(pollBuild, 3000);

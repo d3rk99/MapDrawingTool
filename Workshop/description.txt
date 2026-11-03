@@ -12,56 +12,54 @@ Let your players draw on your server's map. Territories, guild bases, trade spot
 [h2]Features[/h2]
 [list]
 [*]Web map editor: brush, eraser, stamps (built in or your own PNG), painted text, live map markers with the in-game icons.
-[*]Owner approval queue for every map at once: approve, reject, revoke, delete.
-[*]Chernarus, Livonia, Sakhal and Nasdara, using each map's own paper texture.
+[*]Owner approval page for every map at once: approve, reject, revoke, delete.
+[*]Chernarus, Livonia, Sakhal and Nasdara, each on its own in-game paper map texture.
 [*]Several servers on one web app: share one map between servers, or give each server its own.
 [*]Player sign-in with Steam and/or Discord.
-[*]Choose who may submit: anyone, anyone signed in, or only listed SteamIDs or Discord roles (for example Guild Leaders). No Discord bot needed.
+[*]Choose who may submit: anyone, anyone signed in, or only listed Steam accounts or Discord roles (for example Guild Leaders). Per map if you like. No Discord bot needed.
 [*]Rate limits per player.
-[*]Notifications: Discord webhooks, or JSON webhooks for anything else, when a submission arrives or is approved.
-[*]Optional: unfold the map to see only the paper in hand, press M for the full-screen map over it.
+[*]Discord notifications when a submission is waiting for approval.
+[*]Everything set up on a Settings page, no config file editing.
+[*]Optional: unfolding the map shows only the paper in hand, M opens the full-screen map over it.
 [/list]
 
 [h2]Server setup[/h2]
-[b]1. Install the mod[/b]
+You run two things: this mod on your DayZ server, and the Map Drawing Tool web app, a small program you host on a Windows PC or VPS (not on a rented game-server panel).
+
+[b]Download the web app:[/b] [i]link to the GitHub release[/i]
+Full written guide: SERVER_SETUP.md inside the download.
+Video guide: [i]link[/i]
+
+[b]1. Mod[/b]
 [list]
-[*]Add [b]@MapDrawingTool[/b] to your server's -mod= and copy [b]keys/Derk.bikey[/b] into the server's keys folder.
+[*]Add [b]@MapDrawingTool[/b] to your server's -mod=, copy [b]keys\Derk.bikey[/b] to the server's keys folder, start the server once.
 [*]Players need the mod too (required mod, like any other).
 [/list]
 
-[b]2. Run the web app[/b]
-The web app is a small Python program you host yourself (a PC or VPS you control, not inside the DayZ server). Get it from: [i]link to the web app download[/i]
+[b]2. Web app[/b]
 [list]
-[*]Needs Python 3 with Flask and Pillow, and DayZ Tools (Steam, free) for ImageToPAA.
-[*]Run [b]python -I Web\app.py[/b]. The first run writes [b]Web\config.json[/b] with your admin token. Keep that file private.
-[*]Make it reachable: set "host" to "0.0.0.0" and forward port 8640, or better, put it behind HTTPS with a reverse proxy (Caddy does certificates for you) and set "publicUrl" to that address.
-[*]List your maps in Web\config.json, e.g. [b]"maps": [{"id": "pvp", "name": "PvP server", "world": "chernarusplus"}][/b]. World names: chernarusplus, enoch (Livonia), sakhal, nasdara.
+[*]Needs Python 3.10+ (python.org), DayZ Tools (free on Steam) and DayZ or DayZ Server installed on the same PC.
+[*]Unzip the download, run [b]setup.bat[/b], then [b]start.bat[/b].
+[*]Open http://127.0.0.1:8640/admin and paste the admin token from Web\config.json. Everything else is on the [b]Settings[/b] tab.
+[*]Make it reachable from the internet: forward port 8640, or better, put it behind HTTPS (Caddy does it in one line). Enter that address under Settings > Web address.
 [/list]
 
 [b]3. Point your DayZ server at it[/b]
-Start the server once with the mod, then edit [b]profiles\MapDrawingTool\config.json[/b]:
-[code]{ "liveUrl": "https://map.yourdomain.com/", "mapId": "pvp", "pollSeconds": 60 }[/code]
+Edit [b]profiles\MapDrawingTool\config.json[/b] and restart the server:
+[code]{ "liveUrl": "https://map.yourdomain.com/", "mapId": "", "pollSeconds": 60 }[/code]
 [list]
-[*][b]liveUrl[/b] must be reachable by your players, not 127.0.0.1: their games download the map images from it.
-[*][b]mapId[/b] picks which map's drawings this server shows. Two servers with the same mapId share drawings.
+[*][b]liveUrl[/b]: your public web app address. Players' games download the map from it, so not 127.0.0.1.
+[*][b]mapId[/b]: empty = the server's own map. Several servers on the same terrain with different drawings: see SERVER_SETUP.md.
 [/list]
 
 [b]4. Give players the link[/b]
-Players open your web app address (add [b]?map=pvp[/b] to open a map directly), draw, and submit. You approve at [b]/admin[/b] with your admin token.
+Players open your web app address, draw, and submit. You approve on /admin.
 
-[b]Optional: paper map in hand + M[/b]
-In the mission's cfggameplay.json set "use3DMap": true, and in serverDZ.cfg set enableCfgGameplayFile = 1. Unfolding a map then shows only the paper; M opens the full-screen map over it.
-
-[b]Optional: sign-in, access and notifications[/b]
-All in the web app: open [b]/admin[/b], enter your admin token, go to [b]Settings[/b]. Changes apply at once.
+[b]Optional[/b]
 [list]
-[*][b]Steam sign-in[/b]: tick it on. Add a free Steam Web API key (steamcommunity.com/dev/apikey) so player names show.
-[*][b]Discord sign-in[/b]: create an application at discord.com/developers, add the redirect address shown in Settings, paste the application ID, client secret and your Discord server ID. Add a bot token (optional, the bot needs no permissions) to pick roles by name.
-[*][b]Who may submit[/b]: anyone, anyone signed in, or only listed Steam accounts and Discord roles (for example Guild Leader). Set a default and, if you like, different rules per map. Plus limits per hour and waiting at once.
-[*][b]Notifications[/b]: paste a Discord webhook (channel settings > Integrations > Webhooks) to get a ping when something needs approval. "Send test" checks it.
+[*][b]Paper map in hand + M:[/b] mission cfggameplay.json "use3DMap": true, and enableCfgGameplayFile = 1; in serverDZ.cfg.
+[*][b]Sign-in, who may submit, Discord notifications:[/b] Settings tab on /admin.
 [/list]
-
-Video setup guide: [i]link[/i]
 
 [h2]Good to know[/h2]
 [list]

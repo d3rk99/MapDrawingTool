@@ -23,9 +23,9 @@ import tempfile
 from PIL import Image
 
 import compose_layers
+import paths
 from compose_layers import px_per_metre
 
-TO_PAA = r"E:\Steam\steamapps\common\DayZ Tools\Bin\ImageToPAA\ImageToPAA.exe"
 PART_BYTES = 32 * 1024      # bytes per part (about 90 KB of JSON; one native parse per part)
 MAX_LIVE_PX = 512           # longest side of a live image; DayZ needs power-of-two textures
 MAX_STROKE_POINTS = 4000    # per layer, keeps the manifest small enough to relay to every player
@@ -116,7 +116,7 @@ def build_image(world_info, sub_path, sub):
     with tempfile.TemporaryDirectory() as tmp:
         png = os.path.join(tmp, "live_ca.png")         # _ca: ImageToPAA keeps the alpha channel
         img.save(png)
-        subprocess.run([TO_PAA, png, paa], check=True, capture_output=True, timeout=120)
+        subprocess.run([paths.image_to_paa(), png, paa], check=True, capture_output=True, timeout=120)
     data = open(paa, "rb").read()
     x0, z1 = tex_to_world(world_info, cx0, cy0)
     x1, z0 = tex_to_world(world_info, cx1, cy1)
@@ -170,7 +170,7 @@ def build_paper(world, approved, sub_path_of, paper_dir):
         with tempfile.TemporaryDirectory() as tmp:
             png = os.path.join(tmp, "paper_co.png")     # _co: colour texture, like karta_co
             img.convert("RGB").save(png)
-            subprocess.run([TO_PAA, png, paa + ".tmp"], check=True, capture_output=True, timeout=300)
+            subprocess.run([paths.image_to_paa(), png, paa + ".tmp"], check=True, capture_output=True, timeout=300)
         os.replace(paa + ".tmp", paa)
         for old in os.listdir(paper_dir):
             if old != name and old.startswith("paper_"):

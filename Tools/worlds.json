@@ -5,9 +5,12 @@
   "texture": {
    "prefix": "DZ\\structures\\signs\\Tourist\\data",
    "file": "karta_co.paa",
-   "source": "E:\\Steam\\steamapps\\common\\DayZ\\Addons\\structures_signs.pbo",
+   "source": "Addons\\structures_signs.pbo",
    "entry": "tourist\\data\\karta_co.paa",
-   "originPx": [22, 22],
+   "originPx": [
+    22,
+    22
+   ],
    "pxPerMetre": 0.125,
    "afterAddons": []
   }
@@ -18,10 +21,16 @@
   "texture": {
    "prefix": "DZ\\structures_bliss\\signs\\Tourist\\data",
    "file": "karta_enoch_co.paa",
-   "source": "E:\\Steam\\steamapps\\common\\DayZ\\Addons\\structures_signs_bliss.pbo",
+   "source": "Addons\\structures_signs_bliss.pbo",
    "entry": "tourist\\data\\karta_enoch_co.paa",
-   "originPx": [56, 53.5],
-   "pxPerMetre": [0.3106, 0.2811],
+   "originPx": [
+    56,
+    53.5
+   ],
+   "pxPerMetre": [
+    0.3106,
+    0.2811
+   ],
    "afterAddons": []
   }
  },
@@ -31,9 +40,12 @@
   "texture": {
    "prefix": "DZ\\worlds\\sakhal\\data",
    "file": "map_unfolded_sakhal_co.paa",
-   "source": "E:\\Steam\\steamapps\\common\\DayZ\\sakhal\\Addons\\worlds_sakhal_data.pbo",
+   "source": "sakhal\\Addons\\worlds_sakhal_data.pbo",
    "entry": "map_unfolded_sakhal_co.paa",
-   "originPx": [170, 0],
+   "originPx": [
+    170,
+    0
+   ],
    "pxPerMetre": 0.2423,
    "afterAddons": []
   }
@@ -44,10 +56,16 @@
   "texture": {
    "prefix": "DZ\\worlds\\nasdara\\data",
    "file": "map_unfolded_nasdara_co.paa",
-   "source": "E:\\Steam\\steamapps\\common\\DayZ\\nasdara\\addons\\worlds_nasdara_data.pbo",
+   "source": "nasdara\\addons\\worlds_nasdara_data.pbo",
    "entry": "map_unfolded_nasdara_co.paa",
-   "originPx": [44, 40.5],
-   "pxPerMetre": [0.24583, 0.24339],
+   "originPx": [
+    44,
+    40.5
+   ],
+   "pxPerMetre": [
+    0.24583,
+    0.24339
+   ],
    "afterAddons": []
   }
  }
