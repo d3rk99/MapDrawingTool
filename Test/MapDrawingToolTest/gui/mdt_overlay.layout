@@ -1,0 +1,65 @@
+FrameWidgetClass MDTOverlay {
+ ignorepointer 1
+ clipchildren 0
+ position 0 0
+ size 1 1
+ hexactpos 1
+ vexactpos 1
+ hexactsize 0
+ vexactsize 0
+ priority 99
+ {
+  CanvasWidgetClass MDTCanvas {
+   ignorepointer 1
+   position 0 0
+   size 1 1
+   hexactpos 1
+   vexactpos 1
+   hexactsize 0
+   vexactsize 0
+   priority 100
+  }
+  ImageWidgetClass MDTImage {
+   ignorepointer 1
+   position 0 0
+   size 300 300
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   priority 101
+   mode blend
+   "src alpha" 1
+   "stretch mode" stretch_w_h
+  }
+  ImageWidgetClass MDTFixed {
+   ignorepointer 1
+   position 40 160
+   size 256 256
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   priority 101
+   mode blend
+   "src alpha" 1
+   "stretch mode" stretch_w_h
+  }
+  TextWidgetClass MDTText {
+   ignorepointer 1
+   color 1 0.16 0.78 1
+   position 40 20
+   size 1400 130
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   priority 102
+   text "MDT TEST"
+   font "gui/fonts/sdf_MetronBook24"
+   "text color" 1 0.16 0.78 1
+   "exact text" 1
+   "exact text size" 16
+  }
+ }
+}

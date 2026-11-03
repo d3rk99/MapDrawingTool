@@ -1,0 +1,52 @@
+modded class PlayerBase
+{
+	override void OnRPC(PlayerIdentity sender, int rpc_type, ParamsReadContext ctx)
+	{
+		super.OnRPC(sender, rpc_type, ctx);
+
+		if (rpc_type != MDT_RPC_MANIFEST || !GetGame().IsClient())
+			return;
+
+		string version, text, base;
+		int index, count;
+		if (!ctx.Read(version) || !ctx.Read(index) || !ctx.Read(count) || !ctx.Read(text) || !ctx.Read(base))
+			return;
+		if (count < 1 || count > 500 || index < 0 || index >= count)
+			return;
+		MDT_Live.OnChunk(version, index, count, text, base);
+	}
+
+	// With use3DMap the unfolded paper folds on a click, Esc, inventory or raised hands. While the
+	// full-screen map is open over it (M), those inputs belong to the map screen, not the paper.
+	override bool IsMapCallbackCancelInput()
+	{
+		if (MDT_MapScreenOpen())
+			return false;
+		return super.IsMapCallbackCancelInput();
+	}
+
+	override bool IsMapCallbackEndInput()
+	{
+		if (MDT_MapScreenOpen())
+			return false;
+		return super.IsMapCallbackEndInput();
+	}
+
+	// ItemMap.SetMapStateOpen calls this just before it shows the unfolded paper, so the server's
+	// texture (MDT_Live.s_PaperPath) is on it before the first frame; set later, the vanilla map
+	// flashed. MissionGameplay.MDT_UpdatePaper keeps it there after that.
+	override void SetMapOpen(bool state)
+	{
+		super.SetMapOpen(state);
+		if (!state || g_Game.IsDedicatedServer() || this != g_Game.GetPlayer() || MDT_Live.s_PaperPath == "")
+			return;
+		ItemMap paper = ItemMap.Cast(GetItemInHands());
+		if (paper)
+			paper.SetObjectTexture(1, MDT_Live.s_PaperPath);
+	}
+
+	protected bool MDT_MapScreenOpen()
+	{
+		return !g_Game.IsDedicatedServer() && g_Game.GetUIManager() && g_Game.GetUIManager().IsMenuOpen(MENU_MAP);
+	}
+}

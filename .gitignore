@@ -1,0 +1,13 @@
+Build/
+*.biprivatekey
+# admin token, session secret, Steam API key, Discord secret
+Web/config.json
+# player submissions (drawings, uploaded images, who sent them) stay on the owner's machine
+Submissions/
+# generated from game data with Tools/make_basemap.py
+Web/static/maps/
+# test texture made from the game's map (Test/README.md)
+Test/textest/
+__pycache__/
+Test/karta_test.png
+Test/MapDrawingToolTest_karta/karta_co.paa

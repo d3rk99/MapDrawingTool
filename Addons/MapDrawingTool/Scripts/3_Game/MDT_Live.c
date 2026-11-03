@@ -1,0 +1,309 @@
+// Client side of live updates: assembles the manifest the server relays, downloads image layers and
+// the paper map texture once into $profile:MapDrawingTool/cache, and says which are ready to draw.
+//
+// RestContext.FILE writes nothing in DayZ 1.30, so parts arrive as JSON {"d": [int, ...]} (each int
+// is 4 bytes, little-endian), parsed natively and written with FileSerializer.Write(int), which
+// writes exactly those 4 bytes. Writing stops after BUDGET_MS each frame.
+// Parts used to be hex decoded with Substring: script strings are values, so each word copied the
+// whole part, and a 2.4 MB download held the game at a few FPS for 40 s (2026-11-03).
+
+class MDT_PartCallback : RestCallback
+{
+	override void OnSuccess(string data, int dataSize)
+	{
+		MDT_Live.OnPart(data);
+	}
+
+	override void OnError(int errorCode)
+	{
+		MDT_Live.OnPartFailed("error " + errorCode);
+	}
+
+	override void OnTimeout()
+	{
+		MDT_Live.OnPartFailed("timeout");
+	}
+}
+
+class MDT_Part
+{
+	ref array<int> d;
+}
+
+class MDT_Download
+{
+	ref MDT_Layer layer;
+	string temp;
+	string path;
+	int part;
+	int tries;
+	int started;            // GetGame().GetTime() at the first request
+	ref FileSerializer file;
+	ref array<int> words;   // current part, being written
+	int pos;                // next word in words
+	bool waiting;
+}
+
+class MDT_Live
+{
+	static const float BUDGET_MS = 2;            // writing time per frame
+
+	static ref MDT_Manifest s_Manifest;
+	static string s_Base;
+	static int s_ReadyCount;                     // bumps whenever an image becomes drawable
+	static ref map<string, string> s_ImagePaths = new map<string, string>;   // layer id -> cached PAA
+	static string s_PaperPath;                   // cached paper map texture, "" until there is one
+
+	protected static string s_Version;
+	protected static ref array<string> s_Chunks;
+	protected static ref array<ref MDT_Download> s_Queue = new array<ref MDT_Download>;
+	protected static ref MDT_PartCallback s_Callback = new MDT_PartCallback();
+	protected static ref JsonSerializer s_Json = new JsonSerializer();
+	protected static bool s_CleanPending;          // tidy the cache once this manifest's downloads are done
+	protected static int s_LastTick;
+	protected static float s_TicksPerMs;         // TickCount is CPU ticks; measured against frame time
+
+	// One RPC piece of the manifest. All pieces of one version arrive in order.
+	static void OnChunk(string version, int index, int count, string text, string base)
+	{
+		if (index == 0 || version != s_Version || !s_Chunks)
+		{
+			s_Version = version;
+			s_Chunks = new array<string>;
+		}
+		s_Chunks.Insert(text);
+		if (s_Chunks.Count() < count)
+			return;
+		string json;
+		foreach (string piece : s_Chunks)
+			json += piece;
+		s_Chunks = null;
+		Apply(json, base);
+	}
+
+	static void Apply(string json, string base)
+	{
+		MDT_Manifest manifest;
+		string error;
+		if (!JsonFileLoader<MDT_Manifest>.LoadData(json, manifest, error) || !manifest)
+		{
+			Print("[MapDrawingTool] bad manifest: " + error);
+			return;
+		}
+		s_Manifest = manifest;
+		s_Base = base;
+		s_Queue.Clear();
+		s_ImagePaths.Clear();
+		if (!FileExist(MDT_PROFILE_DIR))
+			MakeDirectory(MDT_PROFILE_DIR);
+		if (!FileExist(MDT_CACHE_DIR))
+			MakeDirectory(MDT_CACHE_DIR);
+		foreach (MDT_Layer layer : manifest.layers)
+		{
+			if (layer.kind != "image" || !layer.rect || layer.rect.Count() != 4)
+				continue;
+			string path = MDT_CACHE_DIR + "/" + layer.id + "_" + layer.hash + ".paa";
+			if (FileExist(path))
+			{
+				s_ImagePaths.Set(layer.id, path);
+				continue;
+			}
+			if (base != "")
+				Queue(layer, path);
+		}
+		// queued last: the full-screen map's layers are small and come first.
+		// A new hash means a new file name, so the engine never shows an old texture it cached.
+		MDT_Layer paper = manifest.paper;
+		if (paper && paper.parts > 0 && paper.hash != "")
+		{
+			string paperPath = MDT_CACHE_DIR + "/paper_" + paper.hash + ".paa";
+			if (FileExist(paperPath))
+				s_PaperPath = paperPath;
+			else if (base != "")
+				Queue(paper, paperPath);    // the old texture stays on the paper until this one is in
+		}
+		else
+			s_PaperPath = "";
+		s_ReadyCount++;
+		s_CleanPending = true;
+		Print(string.Format("[MapDrawingTool] manifest %1: %2 markers, %3 layers, %4 to download", manifest.version, manifest.markers.Count(), manifest.layers.Count(), s_Queue.Count()));
+	}
+
+	// Deletes cached files the current manifest does not use: old paper textures (2-10 MB each),
+	// revoked layers, unfinished parts. Runs after the downloads, so the texture on the paper is only
+	// replaced, never removed. One server's files at a time: another server's map downloads again.
+	protected static void CleanCache()
+	{
+		s_CleanPending = false;
+		set<string> keep = new set<string>;
+		foreach (string kept : s_ImagePaths)
+			keep.Insert(kept);
+		if (s_PaperPath != "")
+			keep.Insert(s_PaperPath);
+		string name;
+		FileAttr attr;
+		array<string> drop = new array<string>;
+		FindFileHandle h = FindFile(MDT_CACHE_DIR + "/*", name, attr, FindFileFlags.DIRECTORIES);
+		if (!h)
+			return;
+		bool more = true;
+		while (more)
+		{
+			// only our own file types (FileAttr is not a bit set, so it cannot tell folders apart)
+			bool ours = name.IndexOf(".paa") == name.Length() - 4 || name.IndexOf(".part") == name.Length() - 5;
+			if (name != "" && ours && keep.Find(MDT_CACHE_DIR + "/" + name) < 0)
+				drop.Insert(MDT_CACHE_DIR + "/" + name);
+			more = FindNextFile(h, name, attr);
+		}
+		CloseFindFile(h);
+		int removed = 0;
+		foreach (string old : drop)
+		{
+			if (DeleteFile(old))
+				removed++;
+		}
+		if (removed > 0)
+			Print("[MapDrawingTool] cache: removed " + removed + " old files");
+	}
+
+	protected static void Queue(MDT_Layer layer, string path)
+	{
+		MDT_Download job = new MDT_Download();
+		job.layer = layer;
+		job.path = path;
+		job.temp = path + ".part";
+		s_Queue.Insert(job);
+	}
+
+	// Called every frame by MissionGameplay.
+	static void Update(float timeslice)
+	{
+		// int ticks can wrap over a long frame, so only normal frames are measured
+		if (s_LastTick != 0 && timeslice > 0 && timeslice < 0.1)
+		{
+			float measured = TickCount(s_LastTick) / (timeslice * 1000);
+			if (measured > 0 && s_TicksPerMs <= 0)
+				s_TicksPerMs = measured;
+			else if (measured > 0)
+				s_TicksPerMs = s_TicksPerMs * 0.9 + measured * 0.1;
+		}
+		s_LastTick = TickCount(0);
+		if (s_Queue.Count() == 0)
+		{
+			if (s_CleanPending)
+				CleanCache();
+			return;
+		}
+		MDT_Download job = s_Queue[0];
+		if (job.waiting)
+			return;
+		if (!job.words)
+		{
+			Request(job);
+			return;
+		}
+		// until the tick rate is known, a small fixed batch
+		float budgetF = s_TicksPerMs * BUDGET_MS;
+		int budget = budgetF;
+		int start = TickCount(0);
+		array<int> words = job.words;
+		int count = words.Count();
+		int i = job.pos;
+		while (i < count)
+		{
+			int stop = Math.Min(count, i + 256);
+			while (i < stop)
+			{
+				job.file.Write(words[i]);
+				i++;
+			}
+			if (budget <= 0 || TickCount(start) >= budget)
+				break;
+		}
+		job.pos = i;
+		if (i < count)
+			return;
+		job.words = null;
+		job.part++;
+		if (job.part < job.layer.parts)
+			return;
+		job.file.Close();
+		DeleteFile(job.path);
+		if (CopyFile(job.temp, job.path))
+		{
+			if (job.layer.kind == "paper")
+				s_PaperPath = job.path;
+			else
+				s_ImagePaths.Set(job.layer.id, job.path);
+			s_ReadyCount++;
+			Print(string.Format("[MapDrawingTool] downloaded %1 %2 (%3 bytes, %4 s, %5 ticks/ms)", job.layer.kind, job.layer.id, job.layer.bytes, (GetGame().GetTime() - job.started) / 1000.0, s_TicksPerMs));
+		}
+		DeleteFile(job.temp);
+		s_Queue.RemoveOrdered(0);
+	}
+
+	protected static void Request(MDT_Download job)
+	{
+		if (!job.file)
+		{
+			job.started = GetGame().GetTime();
+			job.file = new FileSerializer();
+			if (!job.file.Open(job.temp, FileMode.WRITE))
+			{
+				Print("[MapDrawingTool] cannot write " + job.temp);
+				s_Queue.RemoveOrdered(0);
+				return;
+			}
+		}
+		RestApi api = GetRestApi();
+		if (!api)
+			api = CreateRestApi();
+		if (!api)
+			return;
+		job.waiting = true;
+		string mapId = s_Manifest.mapId;
+		if (mapId == "")
+			mapId = s_Manifest.world;     // web apps from before maps
+		api.GetRestContext(s_Base).GET(s_Callback, "api/" + mapId + "/live/" + job.layer.id + "/" + job.part);
+	}
+
+	static void OnPart(string data)
+	{
+		if (s_Queue.Count() == 0)
+			return;
+		MDT_Download job = s_Queue[0];
+		job.waiting = false;
+		MDT_Part part;
+		string error;
+		if (!s_Json.ReadFromString(part, data, error) || !part || !part.d || part.d.Count() == 0)
+		{
+			OnPartFailed("bad part " + error);
+			return;
+		}
+		job.words = part.d;
+		job.pos = 0;
+	}
+
+	static void OnPartFailed(string why)
+	{
+		if (s_Queue.Count() == 0)
+			return;
+		MDT_Download job = s_Queue[0];
+		job.waiting = false;
+		job.tries++;
+		Print("[MapDrawingTool] layer " + job.layer.id + " part " + job.part + " failed: " + why);
+		if (job.tries < 3)
+			return;
+		if (job.file)
+			job.file.Close();
+		DeleteFile(job.temp);
+		s_Queue.RemoveOrdered(0);
+	}
+
+	static array<ref MDT_Marker> GetMarkers()
+	{
+		if (s_Manifest)
+			return s_Manifest.markers;
+		return null;
+	}
+}

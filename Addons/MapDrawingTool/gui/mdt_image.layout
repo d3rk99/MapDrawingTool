@@ -1,0 +1,13 @@
+ImageWidgetClass MDTImage {
+ ignorepointer 1
+ position 0 0
+ size 64 64
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ priority 99
+ mode blend
+ "src alpha" 1
+ "stretch mode" stretch_w_h
+}

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map Drawing Tool</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="editor">
+<aside id="panel">
+  <h1>Map Drawing Tool</h1>
+  <label>Map <select id="world"></select></label>
+
+  <section>
+    <h2>Tools</h2>
+    <div class="tools" id="tools">
+      <button data-tool="pan" title="Move the map (or hold Space / right-drag)">Move</button>
+      <button data-tool="brush" title="Paint (B)">Brush</button>
+      <button data-tool="eraser" title="Erase your paint (E)">Eraser</button>
+      <button data-tool="stamp" title="Place a stamp (S)">Stamp</button>
+      <button data-tool="text" title="Paint a label (T)">Text</button>
+      <button data-tool="marker" title="Drop a live map marker (M)">Marker</button>
+    </div>
+    <label>Colour <input type="color" id="color" value="#2060e0"></label>
+    <label>Opacity <input type="range" id="opacity" min="10" max="100" value="80"><output id="opacityOut"></output></label>
+    <label id="sizeRow">Size <input type="range" id="size" min="4" max="1500" value="40"><output id="sizeOut"></output></label>
+    <label id="rotRow" hidden>Rotation <input type="range" id="rotation" min="-180" max="180" value="0"><output id="rotOut"></output></label>
+    <label id="textRow" hidden>Text <input id="paintText" maxlength="40" placeholder="Guild name"></label>
+  </section>
+
+  <section id="stampSection" hidden>
+    <h2>Stamps</h2>
+    <div class="stamps" id="stamps"></div>
+    <label class="file">Add your own PNG <input type="file" id="stampFile" accept="image/png,image/jpeg,image/webp"></label>
+  </section>
+
+  <section id="markerSection" hidden>
+    <h2>Marker</h2>
+    <p class="hint">Markers go live in game as soon as the server owner approves them. No download needed.</p>
+    <label>Label <input id="markerText" maxlength="64" placeholder="Guild HQ"></label>
+    <div class="icons" id="icons"></div>
+  </section>
+
+  <section>
+    <h2>Your drawing</h2>
+    <div class="row">
+      <button id="undo" title="Ctrl+Z">Undo</button>
+      <button id="redo" title="Ctrl+Y">Redo</button>
+      <button id="clear">Clear</button>
+    </div>
+    <label><input type="checkbox" id="showApproved" checked> Show approved work</label>
+  </section>
+
+  <section>
+    <h2>Submit</h2>
+    <div id="account" class="account">
+      <span id="whoami"></span>
+      <span id="signin" class="row"></span>
+      <button id="signout" hidden>Sign out</button>
+    </div>
+    <p id="access" class="hint" hidden></p>
+    <label id="authorRow">Your name <input id="author" maxlength="32"></label>
+    <label>Group / guild <input id="group" maxlength="32"></label>
+    <label>Title <input id="title" maxlength="64" placeholder="Our territory"></label>
+    <button id="submit" class="primary">Submit drawing for approval</button>
+    <p id="status" class="status" role="status"></p>
+  </section>
+</aside>
+
+<main id="stage">
+  <canvas id="view"></canvas>
+  <div id="coords"></div>
+  <div id="markerPopup" hidden>
+    <p>Drop marker <b id="popupText"></b> here?</p>
+    <div class="row"><button id="popupOk" class="primary">Submit marker</button><button id="popupCancel">Cancel</button></div>
+  </div>
+</main>
+<script src="/static/common.js"></script>
+<script src="/static/editor.js"></script>
+</body>
+</html>

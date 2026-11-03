@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map Approvals</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="admin">
+<header>
+  <h1>Map Drawing Tool — approvals</h1>
+  <input id="token" type="password" placeholder="Admin token" autocomplete="off">
+  <button id="load">Open</button>
+</header>
+<p id="status" class="status" role="status"></p>
+
+<div class="tabs row" id="tabs" hidden>
+  <button data-status="pending" class="active">Pending <span id="count-pending"></span></button>
+  <button data-status="approved">Approved <span id="count-approved"></span></button>
+  <button data-status="rejected">Rejected <span id="count-rejected"></span></button>
+</div>
+<section id="list"></section>
+
+<section id="buildSection" hidden>
+  <h2>Map update</h2>
+  <p class="hint">Approved markers and drawings show in game within a minute or two, no restart and no mod update:
+  on the full-screen map (M) and on the paper map in hand. Only the wooden map boards need a build: it writes a
+  signed mod with the drawings baked into the map texture to <code>MapDrawingTool\Build\@MapDrawingTool</code>,
+  which then has to go to the server and the Workshop as an update.</p>
+  <div class="row"><select id="buildMap" aria-label="Map to bake"></select>
+  <button id="build">Build signed mod with this map's drawings on the boards</button></div>
+  <pre class="log" id="buildLog"></pre>
+</section>
+<script src="/static/common.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>
