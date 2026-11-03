@@ -13,13 +13,16 @@ Web/config.json:
                                            discord.com/developers, redirect <publicUrl>/login/discord/return).
                                            With guildId it also reads the player's roles in that server.
   },
-  "submitters": {                          default for every map; a map in "maps" can override any key
+  "submitters": {                          default for every map; a map can override any key, in its
+                                           "maps" entry or in "mapSubmitters": {"<map id>": {...}}
     "who": "anyone" | "signed-in" | "listed",
     "steamIds": ["7656..."],               "listed": these SteamIDs may submit
     "discordRoles": ["1234..."],           "listed": members with any of these role IDs may submit
     "perHour": 10,                         submissions per player (or per address when anyone may) per hour
     "maxPending": 20                       waiting for approval per player at once
   }
+
+All of this can be set on the admin page (Settings), which writes config.json (settings.py).
 
 Discord roles need no bot: the "guilds.members.read" sign-in scope lets the player's own login read
 their roles in guildId. Role IDs: Discord settings > Advanced > Developer Mode, then right-click
@@ -46,10 +49,9 @@ DISCORD_API = "https://discord.com/api/v10"
 
 
 def init(app, cfg, maps, subs_of):
-    global SUBS_OF
-    CFG.update(cfg)
-    MAPS.update(maps)
-    SUBS_OF = subs_of
+    """Keeps the app's own config and maps dicts, so settings saved from /admin apply at once."""
+    global CFG, MAPS, SUBS_OF
+    CFG, MAPS, SUBS_OF = cfg, maps, subs_of
     app.secret_key = cfg["sessionSecret"]
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                       SESSION_COOKIE_SECURE=public_url().startswith("https://"),
@@ -76,9 +78,12 @@ def providers():
 
 
 def rules(map_id):
+    """Default rules, then the map's own: "submitters" in its "maps" entry, then "mapSubmitters"
+    (what the admin page's Settings saves)."""
     r = dict(DEFAULT_RULES)
     r.update(CFG.get("submitters") or {})
     r.update(MAPS.get(map_id, {}).get("submitters") or {})
+    r.update((CFG.get("mapSubmitters") or {}).get(map_id) or {})
     return r
 
 

@@ -53,11 +53,12 @@ Players open your web app address (add [b]?map=pvp[/b] to open a map directly), 
 In the mission's cfggameplay.json set "use3DMap": true, and in serverDZ.cfg set enableCfgGameplayFile = 1. Unfolding a map then shows only the paper; M opens the full-screen map over it.
 
 [b]Optional: sign-in, access and notifications[/b]
-In Web\config.json:
+All in the web app: open [b]/admin[/b], enter your admin token, go to [b]Settings[/b]. Changes apply at once.
 [list]
-[*][b]"login"[/b]: "steam": true, and a free Steam Web API key ("steamApiKey") for player names. For Discord, create an application at discord.com/developers and add its client ID and secret, plus your server ("guild") ID to check roles.
-[*][b]"submitters"[/b]: "who": "anyone", "signed-in" or "listed", with "steamIds" or "discordRoles" (role IDs), "perHour" and "maxPending". A map can override these.
-[*][b]"webhooks"[/b]: a Discord webhook URL with "format": "discord" to get a ping when something needs approval.
+[*][b]Steam sign-in[/b]: tick it on. Add a free Steam Web API key (steamcommunity.com/dev/apikey) so player names show.
+[*][b]Discord sign-in[/b]: create an application at discord.com/developers, add the redirect address shown in Settings, paste the application ID, client secret and your Discord server ID. Add a bot token (optional, the bot needs no permissions) to pick roles by name.
+[*][b]Who may submit[/b]: anyone, anyone signed in, or only listed Steam accounts and Discord roles (for example Guild Leader). Set a default and, if you like, different rules per map. Plus limits per hour and waiting at once.
+[*][b]Notifications[/b]: paste a Discord webhook (channel settings > Integrations > Webhooks) to get a ping when something needs approval. "Send test" checks it.
 [/list]
 
 Video setup guide: [i]link[/i]

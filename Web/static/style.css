@@ -72,3 +72,15 @@ body.admin { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .mapgroup summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
 .mapgroup .cards { margin: 8px 0 4px; }
 pre.log { background: #000; padding: 10px; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+
+/* admin settings */
+#settings .panel { border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 12px 0; }
+#settings h3 { margin: 0 0 8px; font-size: 15px; }
+#settings h4 { margin: 14px 0 4px; font-size: 14px; }
+#settings .setting { display: flex; flex-direction: column; align-items: stretch; text-align: left; gap: 3px; margin: 8px 0; flex: 1; min-width: 200px; }
+#settings .setting > span { font-size: 13px; color: var(--muted); }
+#settings .setting input:not([type=checkbox]), #settings .setting select, #settings textarea { width: 100%; box-sizing: border-box; }
+#settings .chip, #settings .role { display: inline-flex; align-items: center; gap: 5px; margin: 3px 12px 3px 0; }
+#settings .chips, #settings .roles { display: flex; flex-wrap: wrap; }
+#settings .webhook { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; padding: 6px 10px; }
+#settings .rules { margin-top: 6px; }

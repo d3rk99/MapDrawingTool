@@ -38,6 +38,7 @@ import access  # noqa: E402
 import compose_layers  # noqa: E402  (shares the submission rules with the builder)
 import live  # noqa: E402
 import notify  # noqa: E402
+import settings  # noqa: E402
 
 CONFIG_PATH = os.path.join(HERE, "config.json")
 BUILD_OUT = os.path.join(REPO, "Build", "@MapDrawingTool")   # signed, ready to copy to the server / Workshop
@@ -57,8 +58,15 @@ def load_config():
         print(f"Wrote {CONFIG_PATH} with a new admin token (open the file to read it).")
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = json.load(f)
+    changed = False
     if not cfg.get("sessionSecret"):               # signs player sign-in cookies (access.py)
         cfg["sessionSecret"] = secrets.token_urlsafe(32)
+        changed = True
+    for hook in cfg.get("webhooks") or []:         # the admin page's Settings edits webhooks by id
+        if not hook.get("id"):
+            hook["id"] = secrets.token_hex(4)
+            changed = True
+    if changed:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=1)
     return cfg
@@ -447,6 +455,9 @@ def api_build():
     build_state.update(running=True, log="Building...", ok=None, finished=None)
     threading.Thread(target=run, daemon=True).start()
     return jsonify(started=True)
+
+
+settings.init(app, CFG, MAPS, CONFIG_PATH, require_admin, access.public_url)
 
 
 if __name__ == "__main__":

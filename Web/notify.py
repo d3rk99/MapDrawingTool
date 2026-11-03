@@ -22,9 +22,9 @@ import json
 import threading
 import urllib.request
 
-COLORS = {"submitted": 0xC9A24A, "approved": 0x3FA34D, "rejected": 0xC0392B, "deleted": 0x7F8C8D}
+COLORS = {"submitted": 0xC9A24A, "approved": 0x3FA34D, "rejected": 0xC0392B, "deleted": 0x7F8C8D, "test": 0x3498DB}
 VERBS = {"submitted": "New submission waiting for approval", "approved": "Approved", "rejected": "Rejected",
-         "deleted": "Deleted"}
+         "deleted": "Deleted", "test": "Test from the admin page"}
 
 
 def send(cfg, event, map_info, sub, admin_url):
@@ -37,6 +37,13 @@ def send(cfg, event, map_info, sub, admin_url):
 
 
 def _post(hook, event, map_info, sub, admin_url):
+    ok, why = post_now(hook, event, map_info, sub, admin_url)
+    if not ok:
+        print(f"[webhook] {event} to {hook['url'][:40]}...: {why}")
+
+
+def post_now(hook, event, map_info, sub, admin_url):
+    """Sends one webhook now. (ok, reason)."""
     if hook.get("format") == "discord":
         what = f"📍 Marker \"{sub.get('text')}\"" if sub.get("kind") == "marker" else f"🖌️ {sub.get('title') or 'Untitled drawing'}"
         by = sub.get("author", "?") + (f" ({sub['group']})" if sub.get("group") else "")
@@ -56,6 +63,6 @@ def _post(hook, event, map_info, sub, admin_url):
         headers["X-MDT-Signature"] = "sha256=" + hmac.new(hook["secret"].encode(), data, hashlib.sha256).hexdigest()
     try:
         with urllib.request.urlopen(urllib.request.Request(hook["url"], data=data, headers=headers), timeout=10):
-            pass
+            return True, ""
     except Exception as e:
-        print(f"[webhook] {event} to {hook['url'][:40]}...: {e}")
+        return False, str(e)

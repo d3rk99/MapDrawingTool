@@ -40,6 +40,10 @@ function render() {
   for (const s of ["pending", "approved", "rejected"])
     $("count-" + s).textContent = `(${subs.filter((x) => x.status === s).length})`;
   for (const b of $("tabs").children) b.classList.toggle("active", b.dataset.status === tab);
+  const onSettings = tab === "settings";
+  $("settings").hidden = !onSettings;
+  $("list").hidden = $("buildSection").hidden = onSettings;
+  if (onSettings) return Settings.show($("settings"));
   const list = $("list");
   list.replaceChildren();
   const shown = subs.filter((s) => s.status === tab && byId[s.map]).sort((a, b) => b.created.localeCompare(a.created));

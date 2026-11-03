@@ -113,7 +113,12 @@ The server owner's setup guide is the Workshop description, `Workshop\descriptio
 
 ### Who may submit (`Web\access.py`)
 
-Players can sign in with Steam and/or Discord. In `Web\config.json`:
+Players can sign in with Steam and/or Discord. The owner sets all of this, and the webhooks below,
+on `/admin` > **Settings** (`Web\settings.py`), which writes `Web\config.json` and applies it at once.
+Secrets (Steam API key, Discord client secret and bot token, webhook addresses) are never sent back
+to the browser; a field left empty keeps the saved value. An optional Discord bot token lets the page
+list the server's roles by name (the bot needs no permissions); sign-in and role checks work without
+it. Per-map rules from the page go to `"mapSubmitters"`. In `Web\config.json`:
 
 ```json
 "publicUrl": "https://map.example.com",
