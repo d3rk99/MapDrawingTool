@@ -26,7 +26,7 @@ Let your players draw on your server's map. Territories, guild bases, trade spot
 [h2]Server setup[/h2]
 You run two things: this mod on your DayZ server, and the Map Drawing Tool web app, a small program you host on a Windows PC or VPS (not on a rented game-server panel).
 
-[b]Download the web app:[/b] [i]link to the GitHub release[/i]
+[b]Download the web app:[/b] [url=https://github.com/d3rk99/MapDrawingTool/releases/latest]github.com/d3rk99/MapDrawingTool/releases[/url] (MapDrawingTool-WebApp zip)
 Full written guide: SERVER_SETUP.md inside the download.
 Video guide: [i]link[/i]
 
