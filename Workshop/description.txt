@@ -2,6 +2,7 @@
 
 Let your players draw on your server's map. Territories, guild bases, trade spots, warnings, points of interest: players paint, stamp and label them in game or in a web map editor, you approve them, and they appear on everyone's map within a minute or two. No mod update, no restart, no Workshop re-download.
 
+[hr][/hr]
 [h2]What players see[/h2]
 [list]
 [*][b]The paper map in hand[/b] shows your server's map with every approved drawing on it.
@@ -37,28 +38,29 @@ Carry a pen, open the map (M) and press [b]D[/b]. A bar across the top shows eve
 [*]Optional: unfolding the map shows only the paper in hand, M opens the full-screen map over it.
 [/list]
 
+[hr][/hr]
 [h2]Server setup[/h2]
 You run two things: this mod on your DayZ server, and the Map Drawing Tool web app, a single program you run on a Windows PC or VPS (not on a rented game-server panel).
 
 [b]Download the web app:[/b] [url=https://github.com/d3rk99/MapDrawingTool/releases/latest]github.com/d3rk99/MapDrawingTool/releases[/url] (MapDrawingTool-WebApp zip)
 Full written guide: SERVER_SETUP.md inside the download.
-Video guide: [i]link[/i]
 
-[b]1. Mod[/b]
+[h3]1. Mod[/h3]
 [list]
 [*]Add [b]@MapDrawingTool[/b] to your server's -mod=, copy [b]keys\Derk.bikey[/b] to the server's keys folder, start the server once.
 [*]Players need the mod too (required mod, like any other).
 [/list]
 
-[b]2. Web app[/b]
+[h3]2. Web app[/h3]
 [list]
-[*]Nothing to install: no Python, no DayZ Tools. The four official maps are included.
-[*]Unzip the download and run [b]MapDrawingTool.exe[/b]. (Windows may warn about an unknown publisher: More info, Run anyway.)
-[*]Open http://127.0.0.1:8640/admin and paste the admin token from Web\config.json. Everything else is on the [b]Settings[/b] tab.
+[*]Nothing to install: no Python, no DayZ Tools, no DayZ. The four official maps are included.
+[*]Unzip the download somewhere permanent (e.g. C:\MapDrawingTool) and run [b]MapDrawingTool.exe[/b]. Leave its window open.
+[*]Windows may say "Windows protected your PC" (the exe is not code-signed): click [i]More info[/i], then [i]Run anyway[/i].
+[*]Open [b]http://127.0.0.1:8640/admin[/b] and paste the admin token from [b]Web\config.json[/b]. Everything else is on the [b]Settings[/b] tab.
 [*]Make it reachable from the internet: forward port 8640, or better, put it behind HTTPS (Caddy does it in one line). Enter that address under Settings > Web address.
 [/list]
 
-[b]3. Point your DayZ server at it[/b]
+[h3]3. Point your DayZ server at it[/h3]
 Edit [b]profiles\MapDrawingTool\config.json[/b] and restart the server:
 [code]{ "liveUrl": "https://map.yourdomain.com/", "mapId": "", "serverKey": "from Settings > Game servers", "pollSeconds": 60 }[/code]
 [list]
@@ -67,21 +69,22 @@ Edit [b]profiles\MapDrawingTool\config.json[/b] and restart the server:
 [*][b]serverKey[/b]: needed for drawing in game (and players' own stamps).
 [/list]
 
-[b]4. Give players the link[/b]
+[h3]4. Give players the link[/h3]
 Players open your web app address, or just draw in game. You approve on /admin.
 
-[b]Updating from 0.1.0[/b]
-Close the web app, unzip the new one over the old folder (your settings and submissions are kept), start MapDrawingTool.exe again, then update the mod on the server. Server and players must run the same mod version.
-
-[b]Optional[/b]
+[h3]Optional[/h3]
 [list]
 [*][b]Paper map in hand + M:[/b] mission cfggameplay.json "use3DMap": true, and enableCfgGameplayFile = 1; in serverDZ.cfg.
 [*][b]Sign-in, who may submit, lifespans, personal drawings, Discord notifications:[/b] Settings tab on /admin.
 [/list]
 
+[h3]Updating[/h3]
+Close the web app, unzip the new download over the same folder (your settings and submissions are kept) and start MapDrawingTool.exe again. Update the mod on the server too: server and players must run the same mod version.
+
+[hr][/hr]
 [h2]Good to know[/h2]
 [list]
-[*]Players download your map once per change (2.4 MB on Chernarus, about 10 MB on the larger maps) in the background without FPS loss. Old versions are deleted automatically.
+[*]Players download your map once per change (about 2.5 MB on Chernarus, 10 MB on the larger maps) in the background without FPS loss. Old versions are deleted automatically.
 [*]The wooden map boards in towns keep the vanilla map.
 [*]Built and tested on DayZ 1.30.
 [/list]
