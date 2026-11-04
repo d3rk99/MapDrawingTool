@@ -131,7 +131,7 @@ class MDT_Live
 				continue;
 			}
 			if (base != "")
-				Queue(layer, path);
+				MDT_Enqueue(layer, path);
 		}
 		// queued last: the full-screen map's layers are small and come first.
 		// A new hash means a new file name, so the engine never shows an old texture it cached.
@@ -142,13 +142,13 @@ class MDT_Live
 			if (FileExist(paperPath))
 				s_PaperPath = paperPath;
 			else if (base != "")
-				Queue(paper, paperPath);    // the old texture stays on the paper until this one is in
+				MDT_Enqueue(paper, paperPath);    // the old texture stays on the paper until this one is in
 		}
 		else
 			s_PaperPath = "";
 		foreach (MDT_Download redo : again)
 		{
-			Queue(redo.layer, redo.path);
+			MDT_Enqueue(redo.layer, redo.path);
 			s_Queue[s_Queue.Count() - 1].other = redo.other;
 		}
 		s_ReadyCount++;
@@ -217,11 +217,13 @@ class MDT_Live
 			if (queued.path == path)
 				return path;
 		}
-		Queue(paper, path);
+		MDT_Enqueue(paper, path);
 		s_Queue[s_Queue.Count() - 1].other = true;
 		return path;
 	}
 
+	// MDT_Enqueue, not Queue: Dabs Framework has a class Queue<T>, so Queue(a, b) failed to compile
+	// next to it (2026-11-03).
 	// The preview of the player's own stamp PNG, made by the web app (MDT_Draft.OnUploaded).
 	static void QueueStamp(string name, string preview, int parts)
 	{
@@ -239,10 +241,10 @@ class MDT_Live
 		layer.kind = "stamp";
 		layer.parts = parts;
 		layer.hash = name;                          // the file name, for s_StampPaths
-		Queue(layer, path);
+		MDT_Enqueue(layer, path);
 	}
 
-	protected static void Queue(MDT_Layer layer, string path)
+	protected static void MDT_Enqueue(MDT_Layer layer, string path)
 	{
 		MDT_Download job = new MDT_Download();
 		job.layer = layer;
