@@ -23,7 +23,7 @@ modded class MapMenu
 	protected ref array<string> m_MDT_Pens = new array<string>; // pens carried, by class name
 	protected int m_MDT_Pen;
 	protected int m_MDT_Width = 1;
-	protected int m_MDT_Scope;                                  // index into MDT_Scopes()
+	protected int m_MDT_Scope = -1;                             // index into MDT_Scopes(); -1 = not chosen yet (personal)
 	protected int m_MDT_Life = -1;                              // index into options.lifespans
 	protected Widget m_MDT_Bar;
 	protected TextWidget m_MDT_BarStatus;
@@ -44,7 +44,7 @@ modded class MapMenu
 	static const string MDT_FONTS[5] = {"plain", "bold", "hand", "marker", "comic"};
 	static const string MDT_FONT_NAMES[5] = {"Plain", "Bold", "Handwritten", "Marker", "Comic"};
 	static const float MDT_TEXT_SIZES[4] = {60, 120, 250, 500};     // letter height, metres
-	static const float MDT_STAMP_SIZES[4] = {100, 200, 400, 800};   // width, metres
+	static const float MDT_STAMP_SIZES[5] = {100, 200, 400, 800, 1600};   // width, metres (W cycles)
 	static const string MDT_STAMPS[9] = {"flag", "skull", "swords", "tent", "star", "cross", "ring", "arrow", "danger"};
 	static const string MDT_ICONS[20] = {"Border crossing", "Broadleaf", "Camp", "Factory", "Fir", "Fire station",
 		"Government", "Hill", "Monument", "Palm", "Police", "Station", "Store", "Tourism", "Transmitter", "Shelter",
@@ -302,6 +302,8 @@ modded class MapMenu
 		if (!allowed)
 			return;
 		array<string> scopes = MDT_Scopes();
+		if (m_MDT_Scope < 0 || m_MDT_Scope >= scopes.Count())
+			m_MDT_Scope = Math.Max(0, scopes.Find("personal"));   // personal unless the player picks everyone (G)
 		if (m_MDT_Life < 0 && o.lifespans && o.lifespans.Count() > 0)
 			m_MDT_Life = Math.Max(0, o.lifespans.Find(o.defaultDays));
 
@@ -390,7 +392,7 @@ modded class MapMenu
 				if (m_MDT_Tool == 2)
 					m_MDT_TextSize = (m_MDT_TextSize + 1) % 4;
 				else if (m_MDT_Tool == 3)
-					m_MDT_StampSize = (m_MDT_StampSize + 1) % 4;
+					m_MDT_StampSize = (m_MDT_StampSize + 1) % 5;
 				else
 					m_MDT_Width = (m_MDT_Width + 1) % 4;
 			}
@@ -736,6 +738,7 @@ modded class MapMenu
 					m_MDT_Current.points.Insert(m_MDT_Current.points[1]);
 				}
 				MDT_Draft.s_Strokes.Insert(m_MDT_Current);
+				MDT_Draft.Add(1);                   // so Z can take it back
 				m_MDT_Current = null;
 			}
 			return;

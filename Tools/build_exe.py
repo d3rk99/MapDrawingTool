@@ -44,6 +44,7 @@ def main():
     os.makedirs(os.path.join(out, "Tools"))
     shutil.copy(os.path.join(REPO, "Tools", "worlds.json"), os.path.join(out, "Tools"))
     shutil.copy(os.path.join(REPO, "Package", "SERVER_SETUP.md"), out)
+    shutil.copytree(os.path.join(REPO, "Package", "types"), os.path.join(out, "types"))   # pen spawns for the economy
     with open(os.path.join(out, "VERSION.txt"), "w") as f:
         f.write(version + "\n")
     for bad in ("config.json", "Submissions", "paper"):

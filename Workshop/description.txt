@@ -16,6 +16,7 @@ Carry a pen, open the map (M) and press [b]D[/b]. A bar across the top shows eve
 [list]
 [*][b]1[/b] line, [b]2[/b] marker, [b]3[/b] text, [b]4[/b] stamp. Left mouse draws or places, right mouse drags the map, the mouse wheel zooms.
 [*]Lines in your pen's colour ([b]C[/b] switches pens), 5 fonts for text, the in-game marker icons.
+[*]The vanilla pens are easy to tell apart: [b]Black, Red, Green and Blue Pen[/b], each with a coloured clip and its own description. (Pens rarely spawn: server owners may want to add them to their loot or spawn gear.)
 [*][b]Stamps:[/b] 9 built in, or your own PNG images (up to 96 KB). Put them in [b]%LOCALAPPDATA%\DayZ\MapDrawingTool\stamps[/b] and pick them with [b][ ][/b].
 [*][b]G[/b] everyone or only me, [b]L[/b] how long it stays, [b]Z[/b] undo, [b]Enter[/b] send.
 [*][b]X[/b] lists your own drawings so you can remove them.
@@ -73,6 +74,13 @@ Settings > Game servers on the web app shows these lines ready to copy.
 
 [h3]4. Give players the link[/h3]
 Players open your web app address, or just draw in game. You approve on /admin.
+
+[h3]5. Let pens spawn[/h3]
+Drawing in game needs a pen, and vanilla DayZ never spawns them (nominal 0). The download has [b]types\mdt_types.xml[/b] (also [url=https://github.com/d3rk99/MapDrawingTool/tree/main/Package/types]on GitHub[/url]): the four pens on shelves in towns, villages and offices, about 6 of each. Copy it to a folder [b]mapdrawingtool[/b] in your mission folder and add to [b]cfgeconomycore.xml[/b] inside <economycore>:
+[code]<ce folder="mapdrawingtool">
+    <file name="mdt_types.xml" type="types" />
+</ce>[/code]
+Or replace the four Pen_ entries in db	ypes.xml with the ones from the file. Or give players a pen at spawn.
 
 [h3]Optional[/h3]
 [list]

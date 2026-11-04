@@ -416,6 +416,7 @@ function showOptions(me) {
   const [glob, pers] = $("scope").options;
   glob.disabled = !o.allowGlobal;
   pers.disabled = !o.allowPersonal || !steam;
+  if (!state.scopePicked && !pers.disabled) $("scope").value = "personal";   // only me, unless the player picks everyone
   if ($("scope").selectedOptions[0]?.disabled) $("scope").value = o.allowGlobal ? "global" : "personal";
   $("scopeRow").hidden = !(o.allowGlobal && o.allowPersonal);
   const hint = !o.allowPersonal ? "" : !steam ? "Sign in with Steam to keep drawings on your own map only."
@@ -429,7 +430,7 @@ function showOptions(me) {
   $("daysRow").hidden = o.lifespans.length < 2;
 }
 $("days").onchange = () => { $("days").dataset.touched = "1"; };
-$("scope").onchange = () => { if (state.me) showOptions(state.me); };
+$("scope").onchange = () => { state.scopePicked = true; if (state.me) showOptions(state.me); };
 
 function draftBounds() {
   const { width: w, height: h } = state.draft;
