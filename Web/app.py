@@ -16,6 +16,7 @@ the fallback for servers without a liveUrl.
 """
 import base64
 import datetime
+import hashlib
 import io
 import json
 import os
@@ -132,23 +133,40 @@ def read_sub(path):
         return json.load(f)
 
 
+_changes = {}            # map folder -> writes since start; with the folder's time it keys the index
+_index = {}              # map folder -> (key, submissions)
+
+
+def _changed(path):
+    folder = os.path.dirname(os.path.normpath(path))
+    _changes[folder] = _changes.get(folder, 0) + 1
+
+
 def write_sub(path, sub):
     tmp = os.path.join(path, "submission.json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(sub, f, indent=1)
     os.replace(tmp, os.path.join(path, "submission.json"))
+    _changed(path)
 
 
 def all_subs(map_id):
-    root = os.path.join(SUBS, map_id)
+    """Every submission on a map, oldest first. Read from disk only when something changed: game
+    servers ask every 30-60 s, and a busy server can have thousands of submissions."""
+    root = os.path.normpath(os.path.join(SUBS, map_id))
     if not os.path.isdir(root):
         return []
+    key = (_changes.get(root, 0), os.stat(root).st_mtime_ns)
+    cached = _index.get(root)
+    if cached and cached[0] == key:
+        return cached[1]
     out = []
     for name in sorted(os.listdir(root)):
         p = os.path.join(root, name)
         if os.path.isfile(os.path.join(p, "submission.json")):
             out.append(read_sub(p))
     out.sort(key=lambda s: (s.get("created", ""), s.get("id", "")))
+    _index[root] = (key, out)
     return out
 
 
@@ -415,6 +433,7 @@ def api_admin_delete(map_id, sub_id):
         if sub.get("status") not in ("rejected", "withdrawn"):
             return jsonify(error="Only rejected or withdrawn submissions can be deleted"), 400
         shutil.rmtree(path)
+        _changed(path)
     notify.send(CFG, "deleted", MAPS[map_id], public(sub), access.public_url() + "/admin")
     return jsonify(deleted=sub_id)
 
@@ -448,15 +467,76 @@ def api_admin_review(map_id, sub_id):
 
 # ---------------------------------------------------------------- game server API (live map)
 
+_live_cache = {}         # map id -> (key, minute, json)
+
+
 @app.get("/api/<map_id>/live")
 def api_live(map_id):
-    """Everything approved on this map, for game servers to relay to players (see live.py)."""
+    """Everything approved for everyone on this map, for game servers to relay to players
+    (see live.py). Built once per change (and once a minute, for lifespans that run out) and
+    then handed to every game server as is. Personal work is not in it: /live/players."""
     map_id, world = map_or_404(map_id)
+    all_subs(map_id)
+    key = (_index.get(os.path.normpath(os.path.join(SUBS, map_id)), (None,))[0], json.dumps(access.options(map_id)))
+    minute = now()[:16]
+    cached = _live_cache.get(map_id)
+    if cached and cached[0] == key and cached[1] == minute:
+        text = cached[2]
+    else:
+        glob = [s for s in live_subs(map_id) if not is_personal(s)]
+        with write_lock:
+            body = live.manifest(map_id, world, WORLDS[world], glob, lambda sid: os.path.join(SUBS, map_id, sid),
+                                 os.path.join(PAPER_DIR, map_id), access.options(map_id), None)
+        text = json.dumps(body, separators=(",", ":"))
+        _live_cache[map_id] = (key, minute, text)
+    return app.response_class(text, mimetype="application/json")
+
+
+def personal_of(map_id):
+    """SteamID -> that player's live personal submissions."""
+    out = {}
+    for s in live_subs(map_id):
+        if is_personal(s) and s.get("owner"):
+            out.setdefault(s["owner"], []).append(s)
+    return out
+
+
+@app.post("/api/<map_id>/live/players")
+def api_live_players(map_id):
+    """{"serverKey", "players": [SteamID, ...]} (who is online) -> {"versions": {SteamID: version}}
+    for those with personal work. The game server fetches a player's work (/live/player) only when
+    their version changed, so a poll stays small however many players ever drew something."""
+    map_id, world = map_or_404(map_id)
+    body = request.get_json(silent=True) or {}
+    if not server_ok(body):
+        return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
+    online = {str(p) for p in (body.get("players") or [])[:1000]}
+    mine = personal_of(map_id)
+    versions = {sid: live.personal_version(subs) for sid, subs in mine.items() if sid in online}
+    return jsonify(ok=True, versions=versions), 200
+
+
+@app.post("/api/<map_id>/live/player")
+def api_live_player(map_id):
+    """{"serverKey", "steamId"} -> that player's personal work (markers, layers, their own paper
+    texture: global + personal). Their paper is built here, so only for players who are online."""
+    map_id, world = map_or_404(map_id)
+    body = request.get_json(silent=True) or {}
+    if not server_ok(body):
+        return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
+    sid = str(body.get("steamId", ""))
+    mine = personal_of(map_id).get(sid, [])
+    glob = [s for s in live_subs(map_id) if not is_personal(s)]
     with write_lock:
-        body = live.manifest(map_id, world, WORLDS[world], live_subs(map_id), lambda sid: os.path.join(SUBS, map_id, sid),
-                             os.path.join(PAPER_DIR, map_id), access.options(map_id),
-                             lambda owner: access.personal_key(map_id, owner))
-    return app.response_class(json.dumps(body, separators=(",", ":")), mimetype="application/json")
+        entry = live.personal_entry(world, WORLDS[world], sid, glob, mine, lambda i: os.path.join(SUBS, map_id, i),
+                                    os.path.join(PAPER_DIR, map_id), access.personal_key(map_id, sid))
+        live.clean_personal_papers(os.path.join(PAPER_DIR, map_id))
+    return jsonify(ok=True, version=live.personal_version(mine), **entry), 200
+
+
+def server_ok(body):
+    key = CFG.get("serverKey") or ""
+    return bool(key) and secrets.compare_digest(str(body.get("serverKey", "")), key)
 
 
 @app.get("/api/<map_id>/live/paper/<int:part>")
@@ -601,45 +681,120 @@ def api_ingame_withdraw(map_id):
     return jsonify({**result, "ok": code == 200}), 200
 
 
+UPLOAD_MAX = 96 * 1024          # bytes; the game sends a PNG in small pieces through the game server
+UPLOAD_PX = 1024
+STAMPS_DIR = os.path.join(HERE, "static", "stamps")
+
+
+def upload_dir(sid):
+    return os.path.join(SUBS, "_uploads", sid)
+
+
+def stamp_image(name, sid):
+    """A stamp by name: built in (Web/static/stamps/<name>.png) or "upload:<id>", the player's own."""
+    if name.startswith("upload:"):
+        uid = name[7:]
+        path = os.path.join(upload_dir(sid), uid + ".png") if re.fullmatch(r"[0-9a-f]{16}", uid) else ""
+    else:
+        path = os.path.join(STAMPS_DIR, name + ".png") if re.fullmatch(r"[a-z]{2,12}", name) else ""
+    if not path or not os.path.isfile(path):
+        return None
+    return Image.open(path)
+
+
 @app.post("/api/<map_id>/ingame")
 def api_ingame(map_id):
-    """A drawing made in game with a map and a pen, relayed by the game server.
+    """A drawing made in game (map and pen), relayed by the game server.
 
-    {"serverKey", "steamId", "name", "title", "scope", "days", "strokes": [{"color": ARGB int,
-    "width": metres, "points": [x, z, x, z, ...]}]}. serverKey (Settings > Game servers) proves it
-    comes from the owner's game server, which vouches for the player's SteamID. Always answers 200
-    with {"ok": ...}: the game only sees the body, not the HTTP status."""
+    {"serverKey", "steamId", "name", "title", "scope", "days", "strokes": [...], "texts": [...],
+    "stamps": [...], "markers": [{"x", "z", "text", "icon", "color"}]} (see live.ingame_layer).
+    Lines, text and stamps become one layer submission, each marker a marker submission, all with
+    the same scope and lifespan. serverKey (Settings > Game servers) proves it comes from the
+    owner's game server, which vouches for the player's SteamID. Always answers 200 with
+    {"ok": ...}: the game only sees the body, not the HTTP status."""
     map_id, world = map_or_404(map_id)
     body = request.get_json(silent=True) or {}
-    key = CFG.get("serverKey") or ""
-    if not key or not secrets.compare_digest(str(body.get("serverKey", "")), key):
+    if not server_ok(body):
         return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
     if not access.rules(map_id)["ingame"]:
         return jsonify(ok=False, error="Drawing in game is turned off on this map"), 200
     sid = str(body.get("steamId", ""))
     if not re.fullmatch(r"\d{17}", sid):
         return jsonify(ok=False, error="Bad player id"), 200
-    made = live.ingame_layer(WORLDS[world], body.get("strokes") or [])
-    if not made:
-        return jsonify(ok=False, error="Nothing drawn"), 200
-    png, px, strokes = made
-    tw, th = texture_size(world)
-    px = [max(0, px[0]), max(0, px[1]), min(tw, px[2]), min(th, px[3])]
-    if px[0] >= px[2] or px[1] >= px[3]:
-        return jsonify(ok=False, error="The drawing is outside the map"), 200
-    if (px[2] - px[0], px[3] - px[1]) != Image.open(io.BytesIO(png)).size:
-        img = Image.open(io.BytesIO(png))
-        full = made[1]
-        img = img.crop((px[0] - full[0], px[1] - full[1], px[2] - full[0], px[3] - full[1]))
-        buf = io.BytesIO()
-        img.save(buf, "PNG")
-        png = buf.getvalue()
     user = {"provider": "steam", "id": sid, "name": clean_text(body.get("name"), 32) or "Steam " + sid}
-    result, code = create_submission(map_id, world, {
-        "kind": "layer", "title": clean_text(body.get("title")) or "Drawn in game", "px": px,
-        "image": base64.b64encode(png).decode(), "strokes": strokes, "scope": body.get("scope"),
-        "days": body.get("days")}, user, "game")
-    return jsonify(ok=code == 200, **result), 200
+    common = {"scope": body.get("scope"), "days": body.get("days"), "title": clean_text(body.get("title")) or "Drawn in game"}
+    results = []
+    made = live.ingame_layer(WORLDS[world], body.get("strokes") or [], body.get("texts") or [],
+                             body.get("stamps") or [], lambda n: stamp_image(n, sid), CFG.get("fonts"))
+    if made:
+        png, px, strokes = made
+        tw, th = texture_size(world)
+        clip = [max(0, px[0]), max(0, px[1]), min(tw, px[2]), min(th, px[3])]
+        if clip[0] >= clip[2] or clip[1] >= clip[3]:
+            return jsonify(ok=False, error="The drawing is outside the map"), 200
+        if clip != px:
+            img = Image.open(io.BytesIO(png)).crop((clip[0] - px[0], clip[1] - px[1], clip[2] - px[0], clip[3] - px[1]))
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            png, strokes = buf.getvalue(), None
+        layer = {"kind": "layer", "px": clip, "image": base64.b64encode(png).decode(), **common}
+        if strokes:
+            layer["strokes"] = strokes
+        results.append(create_submission(map_id, world, layer, user, "game"))
+    for m in (body.get("markers") or [])[:20]:
+        argb = int(m.get("color", 0xFFC00000)) & 0xFFFFFFFF
+        results.append(create_submission(map_id, world, {
+            "kind": "marker", "x": m.get("x"), "z": m.get("z"), "text": m.get("text"), "icon": m.get("icon", 0),
+            "color": "#%08X" % argb, **common}, user, "game"))
+    if not results:
+        return jsonify(ok=False, error="Nothing drawn"), 200
+    bad = [r for r, code in results if code != 200]
+    if bad and len(bad) == len(results):
+        return jsonify(ok=False, error=bad[0].get("error", "Refused")), 200
+    first = next(r for r, code in results if code == 200)
+    return jsonify(ok=True, id=first["id"], status=first["status"], scope=first["scope"], count=len(results) - len(bad),
+                   error=bad[0].get("error", "") if bad else ""), 200
+
+
+@app.post("/api/<map_id>/ingame/upload")
+def api_ingame_upload(map_id):
+    """A PNG from the player's Documents\\DayZ\\MapDrawingTool\\stamps folder, sent by the game as
+    little-endian ints (the game can read a file only 4 bytes at a time, so up to 3 bytes at the end
+    may be missing: a PNG ends with a fixed IEND chunk, which is put back). Kept per player; the
+    drawing then names it "upload:<id>"."""
+    map_id, world = map_or_404(map_id)
+    body = request.get_json(silent=True) or {}
+    sid = server_player(body)
+    if not sid:
+        return jsonify(ok=False, error="The game server's serverKey does not match the web app's"), 200
+    words = body.get("words") or []
+    if not words or len(words) * 4 > UPLOAD_MAX + 4:
+        return jsonify(ok=False, error=f"Stamp images can be up to {UPLOAD_MAX // 1024} KB"), 200
+    try:
+        data = b"".join(int(w).to_bytes(4, "little", signed=True) for w in words)
+    except (TypeError, ValueError, OverflowError):
+        return jsonify(ok=False, error="The image could not be read"), 200
+    iend = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    cut = data.rfind(b"IEND")
+    if cut >= 4:
+        data = data[:cut - 4] + iend
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        if img.format != "PNG":
+            raise ValueError
+        img = img.convert("RGBA")
+    except Exception:
+        return jsonify(ok=False, error="Only PNG images can be stamps"), 200
+    if max(img.size) > UPLOAD_PX:
+        img.thumbnail((UPLOAD_PX, UPLOAD_PX))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")                                     # re-encoded: never keep what was sent as is
+    uid = hashlib.sha1(buf.getvalue()).hexdigest()[:16]
+    os.makedirs(upload_dir(sid), exist_ok=True)
+    with open(os.path.join(upload_dir(sid), uid + ".png"), "wb") as f:
+        f.write(buf.getvalue())
+    return jsonify(ok=True, id=uid, name=clean_text(body.get("name"), 64), w=img.width, h=img.height), 200
 
 
 @app.get("/api/admin/build")

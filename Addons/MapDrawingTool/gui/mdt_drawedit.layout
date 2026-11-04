@@ -1,0 +1,40 @@
+PanelWidgetClass MDTDrawEdit {
+ ignorepointer 0
+ color 0.05 0.05 0.05 0.9
+ position 0 84
+ size 620 48
+ halign center_ref
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ style rover_sim_colorable
+ {
+  TextWidgetClass MDTDrawEditLabel {
+   ignorepointer 1
+   color 1 0.82 0.3 1
+   position 12 12
+   size 150 26
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   text "Text:"
+   font "gui/fonts/Metron-Bold"
+   "exact text" 1
+   "exact text size" 18
+  }
+  EditBoxWidgetClass MDTDrawEditBox {
+   color 1 1 1 1
+   position 160 8
+   size 448 32
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   font "gui/fonts/Metron"
+   "exact text" 1
+   "exact text size" 20
+  }
+ }
+}

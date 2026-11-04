@@ -214,10 +214,9 @@ def _layer_entries(world_info, subs, sub_path_of, query=""):
 def manifest(map_id, world, world_info, approved, sub_path_of, paper_dir, options, key_of):
     """What a game server relays to its players. "mapId" is the URL path clients download parts from.
 
-    approved: approved, unexpired submissions. Global ones go to everyone. Personal ones are grouped
-    under "personal" by their author's SteamID; the game server sends each player only their own
-    (with a paper texture of the global layers plus theirs). Their download links carry "query",
-    k=<key_of(steam id)>, so knowing a SteamID is not enough to fetch someone's personal drawings."""
+    approved: approved, unexpired submissions. Global ones go to everyone. With key_of, personal ones
+    are grouped under "personal" by their author's SteamID (tests, small maps); the web app's live
+    route leaves them out (key_of None) and game servers ask per online player (personal_entry)."""
     glob = [s for s in approved if s.get("scope", "global") != "personal"]
     body = {"mapId": map_id, "world": world, "options": options,
             "markers": [compose_layers.marker_entry(s) for s in glob if s.get("kind") == "marker"],
@@ -226,7 +225,7 @@ def manifest(map_id, world, world_info, approved, sub_path_of, paper_dir, option
     if paper:
         body["paper"] = paper
     owners = {}
-    for s in approved:
+    for s in approved if key_of else []:
         if s.get("scope") == "personal" and s.get("owner"):
             owners.setdefault(s["owner"], []).append(s)
     personal = []
@@ -240,48 +239,142 @@ def manifest(map_id, world, world_info, approved, sub_path_of, paper_dir, option
             if own_paper:
                 entry["paper"] = {**own_paper, "query": f"o={owner}&k={key}"}
         personal.append(entry)
-    body["personal"] = personal
+    if key_of:
+        body["personal"] = personal
     body["version"] = hashlib.sha1(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
     return body
 
 
-def ingame_layer(world_info, strokes):
-    """A drawing made in game (strokes in world metres, as the game sends them) as the editor would
-    have sent it: (png bytes, px rect, editor strokes in texture px). None when it has no lines."""
-    from PIL import ImageDraw
+def personal_version(subs):
+    """Changes whenever a player's personal work changes (added, removed, run out)."""
+    sig = sorted((s["id"], s.get("status", ""), s.get("expires") or "") for s in subs)
+    return hashlib.sha1(json.dumps(sig).encode()).hexdigest()[:16]
+
+
+def personal_entry(world, world_info, owner, glob, mine, sub_path_of, paper_dir, key):
+    """One player's personal work for their game: markers, layers (download links carry k=key) and
+    their own paper texture (global + personal layers)."""
+    entry = {"owner": owner,
+             "markers": [compose_layers.marker_entry(s) for s in mine if s.get("kind") == "marker"],
+             "layers": _layer_entries(world_info, mine, sub_path_of, "k=" + key)}
+    if any(s.get("kind") == "layer" for s in mine):
+        folder = os.path.join(paper_dir, "personal", owner)
+        own_paper = build_paper(world, glob + mine, sub_path_of, folder)
+        if own_paper:
+            entry["paper"] = {**own_paper, "query": f"o={owner}&k={key}"}
+            os.utime(folder)                         # in use: clean_personal_papers keeps it
+    return entry
+
+
+_last_clean = {}
+
+
+def clean_personal_papers(paper_dir, days=30):
+    """Removes personal paper textures nobody asked for in `days` (players who stopped playing).
+    Runs at most once an hour."""
+    import shutil
+    import time
+    now = time.time()
+    if now - _last_clean.get(paper_dir, 0) < 3600:
+        return
+    _last_clean[paper_dir] = now
+    root = os.path.join(paper_dir, "personal")
+    if not os.path.isdir(root):
+        return
+    for owner in os.listdir(root):
+        folder = os.path.join(root, owner)
+        if os.path.isdir(folder) and now - os.path.getmtime(folder) > days * 86400:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+# Fonts for text written in game. The web app runs on Windows, which has these; another font file
+# can be named in Web/config.json "fonts": {"name": "C:/path/font.ttf"}.
+FONTS = {"plain": "arial.ttf", "bold": "arialbd.ttf", "hand": "Inkfree.ttf", "marker": "impact.ttf",
+         "comic": "comic.ttf"}
+
+
+def font_file(name, extra=None):
+    path = (extra or {}).get(name) or FONTS.get(name) or FONTS["plain"]
+    if not os.path.isabs(path):
+        path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", path)
+    return path
+
+
+def ingame_layer(world_info, strokes, texts=(), stamps=(), stamp_image=None, fonts=None):
+    """A drawing made in game as the editor would have sent it: (png bytes, px rect, editor
+    strokes in texture px, or None when it also has text or stamps). None when it is empty.
+
+    strokes: [{"color": ARGB int, "width": metres, "points": [x, z, ...]}]
+    texts:   [{"text", "x", "z", "size": letter height in metres, "color", "font", "rot": degrees}]
+    stamps:  [{"stamp": name, "x", "z", "size": width in metres, "rot"}]; stamp_image(name) gives
+             the stamp as a PIL image (built-in or the player's upload), or None."""
+    import io
+    from PIL import ImageDraw, ImageFont
     size, ox, oy, sx, sy = _calib(world_info)
     k = (sx + sy) / 2
+    to_px = lambda x, z: (ox + float(x) * sx, oy + (size - float(z)) * sy)
+
+    def rgba(argb):
+        argb = int(argb) & 0xFFFFFFFF
+        return (argb >> 16 & 255, argb >> 8 & 255, argb & 255, (argb >> 24 & 255) or 255)
+
+    # every item as (image or None, centre px, draw function) to find the bounding box first
+    pieces = []
     lines = []
-    for st in strokes[:100]:
+    for st in list(strokes)[:100]:
         pts = st.get("points") or []
-        xy = [(ox + float(pts[i]) * sx, oy + (size - float(pts[i + 1])) * sy) for i in range(0, len(pts) - 1, 2)]
-        if not xy:
+        xy = [to_px(pts[i], pts[i + 1]) for i in range(0, len(pts) - 1, 2)]
+        if xy:
+            width = max(1.0, min(200.0, float(st.get("width", 20)) * k))
+            lines.append((xy, rgba(st.get("color", 0)), width))
+    for t in list(texts)[:50]:
+        text = " ".join(str(t.get("text", "")).split())[:60]
+        if not text:
             continue
-        argb = int(st.get("color", 0)) & 0xFFFFFFFF
-        a, r, g, b = argb >> 24 & 255, argb >> 16 & 255, argb >> 8 & 255, argb & 255
-        width = max(1.0, min(200.0, float(st.get("width", 20)) * k))
-        lines.append((xy, (r, g, b), a / 255 or 1.0, width))
-    if not lines:
+        height = max(6, min(600, float(t.get("size", 150)) * k))
+        try:
+            font = ImageFont.truetype(font_file(str(t.get("font", "plain")), fonts), int(height))
+        except OSError:
+            font = ImageFont.load_default()
+        box = font.getbbox(text)
+        img = Image.new("RGBA", (box[2] - box[0] + 8, box[3] - box[1] + 8), (0, 0, 0, 0))
+        ImageDraw.Draw(img).text((4 - box[0], 4 - box[1]), text, font=font, fill=rgba(t.get("color", 0xFF1E1E1E)),
+                                 stroke_width=max(1, int(height / 14)), stroke_fill=(255, 255, 255, 200))
+        img = img.rotate(-float(t.get("rot", 0)), expand=True, resample=Image.BICUBIC)
+        pieces.append((img, to_px(t.get("x", 0), t.get("z", 0))))
+    for st in list(stamps)[:50]:
+        src = stamp_image(str(st.get("stamp", ""))) if stamp_image else None
+        if src is None:
+            continue
+        w = max(4, min(1200, float(st.get("size", 300)) * k))
+        img = src.convert("RGBA").resize((int(w), max(1, int(w * src.height / src.width))), Image.LANCZOS)
+        img = img.rotate(-float(st.get("rot", 0)), expand=True, resample=Image.BICUBIC)
+        pieces.append((img, to_px(st.get("x", 0), st.get("z", 0))))
+    if not lines and not pieces:
         return None
-    pad = max(w for *_, w in lines) / 2 + 2
-    x0 = int(min(x for xy, *_ in lines for x, _ in xy) - pad)
-    y0 = int(min(y for xy, *_ in lines for _, y in xy) - pad)
-    x1 = int(max(x for xy, *_ in lines for x, _ in xy) + pad) + 1
-    y1 = int(max(y for xy, *_ in lines for _, y in xy) + pad) + 1
-    img = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
+
+    xs, ys = [], []
+    for xy, _, width in lines:
+        xs += [x - width for x, _ in xy] + [x + width for x, _ in xy]
+        ys += [y - width for _, y in xy] + [y + width for _, y in xy]
+    for img, (cx, cy) in pieces:
+        xs += [cx - img.width / 2, cx + img.width / 2]
+        ys += [cy - img.height / 2, cy + img.height / 2]
+    x0, y0, x1, y1 = int(min(xs)) - 2, int(min(ys)) - 2, int(max(xs)) + 3, int(max(ys)) + 3
+    canvas = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    d = ImageDraw.Draw(canvas)
     editor = []
-    for xy, rgb, alpha, width in lines:
+    for xy, colour, width in lines:
         local = [(x - x0, y - y0) for x, y in xy]
-        colour = rgb + (round(alpha * 255),)
         if len(local) > 1:
             d.line(local, fill=colour, width=max(1, round(width)), joint="curve")
         r = width / 2
         for x, y in (local[0], local[-1]):
             d.ellipse([x - r, y - r, x + r, y + r], fill=colour)
-        editor.append({"color": "#%02x%02x%02x" % rgb, "alpha": alpha, "width": width,
+        editor.append({"color": "#%02x%02x%02x" % colour[:3], "alpha": colour[3] / 255, "width": width,
                        "points": [[round(x, 1), round(y, 1)] for x, y in xy]})
-    import io
+    for img, (cx, cy) in pieces:
+        canvas.alpha_composite(img, (int(cx - img.width / 2 - x0), int(cy - img.height / 2 - y0)))
     buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return buf.getvalue(), [x0, y0, x1, y1], editor
+    canvas.save(buf, "PNG")
+    return buf.getvalue(), [x0, y0, x1, y1], (editor if not pieces else None)

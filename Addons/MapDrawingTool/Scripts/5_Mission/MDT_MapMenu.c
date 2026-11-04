@@ -39,6 +39,39 @@ modded class MapMenu
 	protected int m_MDT_BrowseIdx;
 	protected int m_MDT_BrowseSeen = -1;
 	protected float m_MDT_DeleteArmed;                          // seconds left to press Delete again
+	// Tools while drawing: 1 pen, 2 marker, 3 text, 4 stamp
+	static const string MDT_TOOLS[4] = {"Pen", "Marker", "Text", "Stamp"};
+	static const string MDT_FONTS[5] = {"plain", "bold", "hand", "marker", "comic"};
+	static const string MDT_FONT_NAMES[5] = {"Plain", "Bold", "Handwritten", "Marker", "Comic"};
+	static const float MDT_TEXT_SIZES[4] = {60, 120, 250, 500};     // letter height, metres
+	static const float MDT_STAMP_SIZES[4] = {100, 200, 400, 800};   // width, metres
+	static const string MDT_STAMPS[9] = {"flag", "skull", "swords", "tent", "star", "cross", "ring", "arrow", "danger"};
+	static const string MDT_ICONS[20] = {"Border crossing", "Broadleaf", "Camp", "Factory", "Fir", "Fire station",
+		"Government", "Hill", "Monument", "Palm", "Police", "Station", "Store", "Tourism", "Transmitter", "Shelter",
+		"Trail sign", "Viewpoint", "Vineyard", "Water pump"};
+	protected int m_MDT_Tool;
+	protected int m_MDT_Icon = 2;
+	protected int m_MDT_Font;
+	protected int m_MDT_TextSize = 1;
+	protected int m_MDT_StampSize = 1;
+	protected int m_MDT_StampIdx;
+	protected float m_MDT_Rot;
+	protected ref array<string> m_MDT_StampList = new array<string>;   // built-in names, then "file:<name>"
+	protected bool m_MDT_LeftWas;
+	protected Widget m_MDT_Edit;
+	protected EditBoxWidget m_MDT_EditBox;
+	protected TextWidget m_MDT_EditLabel;
+	protected int m_MDT_EditKind;                               // 2 text, 4 marker: what the box is for
+	protected float m_MDT_EditX, m_MDT_EditZ;
+	// previews of what is placed but not sent
+	protected int m_MDT_PrevVersion = -1;
+	protected ref array<Widget> m_MDT_PrevTexts = new array<Widget>;
+	protected ref array<Widget> m_MDT_PrevStamps = new array<Widget>;
+	protected ref array<Widget> m_MDT_PrevMarkers = new array<Widget>;
+	protected ref array<Widget> m_MDT_PrevLabels = new array<Widget>;
+	protected ImageWidget m_MDT_Ghost;                          // the stamp under the mouse
+	protected string m_MDT_GhostStamp;
+	protected ref set<string> m_MDT_NoPreview = new set<string>;   // PNGs DayZ would not show
 
 	override Widget Init()
 	{
@@ -64,6 +97,15 @@ modded class MapMenu
 			m_MDT_Catch.SetSort(999);
 			m_MDT_Catch.Show(false);
 		}
+		m_MDT_Edit = GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawedit.layout", layoutRoot);
+		if (m_MDT_Edit)
+		{
+			m_MDT_Edit.SetSort(1002);
+			m_MDT_EditBox = EditBoxWidget.Cast(m_MDT_Edit.FindAnyWidget("MDTDrawEditBox"));
+			m_MDT_EditLabel = TextWidget.Cast(m_MDT_Edit.FindAnyWidget("MDTDrawEditLabel"));
+			m_MDT_Edit.Show(false);
+		}
+		MDT_Draft.s_Typing = false;
 		m_MDT_Bar = GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_drawbar.layout", layoutRoot);
 		if (m_MDT_Bar)
 		{
@@ -291,8 +333,49 @@ modded class MapMenu
 			else
 				m_MDT_Drawing = !m_MDT_Drawing;
 		}
+		if (MDT_Draft.s_Typing)
+		{
+			MDT_UpdateTyping();
+			MDT_DrawPreviews(mx, my, pxPerMetre);
+			MDT_ShowBar(scopes);
+			return;
+		}
 		if (m_MDT_Drawing)
 		{
+			if (MDT_Key(KeyCode.KC_1))
+				m_MDT_Tool = 0;
+			if (MDT_Key(KeyCode.KC_2))
+				m_MDT_Tool = 1;
+			if (MDT_Key(KeyCode.KC_3))
+				m_MDT_Tool = 2;
+			if (MDT_Key(KeyCode.KC_4))
+			{
+				m_MDT_Tool = 3;
+				MDT_ListStamps();
+			}
+			if (MDT_Key(KeyCode.KC_F))
+				m_MDT_Font = (m_MDT_Font + 1) % 5;
+			if (MDT_Key(KeyCode.KC_Q))
+				m_MDT_Rot = Math.ModFloat(m_MDT_Rot + 345, 360);
+			if (MDT_Key(KeyCode.KC_E))
+				m_MDT_Rot = Math.ModFloat(m_MDT_Rot + 15, 360);
+			bool next = MDT_Key(KeyCode.KC_RBRACKET);
+			bool prev = MDT_Key(KeyCode.KC_LBRACKET);
+			if (m_MDT_Tool == 1 && (next || prev))
+			{
+				if (next)
+					m_MDT_Icon = (m_MDT_Icon + 1) % 20;
+				else
+					m_MDT_Icon = (m_MDT_Icon + 19) % 20;
+			}
+			if (m_MDT_Tool == 3 && m_MDT_StampList.Count() > 0 && (next || prev))
+			{
+				int n = m_MDT_StampList.Count();
+				if (next)
+					m_MDT_StampIdx = (m_MDT_StampIdx + 1) % n;
+				else
+					m_MDT_StampIdx = (m_MDT_StampIdx + n - 1) % n;
+			}
 			if (MDT_Key(KeyCode.KC_C))
 			{
 				MDT_FindPens();
@@ -300,18 +383,28 @@ modded class MapMenu
 					m_MDT_Pen = (m_MDT_Pen + 1) % m_MDT_Pens.Count();
 			}
 			if (MDT_Key(KeyCode.KC_W))
-				m_MDT_Width = (m_MDT_Width + 1) % 4;
+			{
+				if (m_MDT_Tool == 2)
+					m_MDT_TextSize = (m_MDT_TextSize + 1) % 4;
+				else if (m_MDT_Tool == 3)
+					m_MDT_StampSize = (m_MDT_StampSize + 1) % 4;
+				else
+					m_MDT_Width = (m_MDT_Width + 1) % 4;
+			}
 			if (MDT_Key(KeyCode.KC_G) && scopes.Count() > 0)
 				m_MDT_Scope = (m_MDT_Scope + 1) % scopes.Count();
 			if (MDT_Key(KeyCode.KC_L) && o.lifespans && o.lifespans.Count() > 0)
 				m_MDT_Life = (m_MDT_Life + 1) % o.lifespans.Count();
-			if (MDT_Key(KeyCode.KC_Z) && MDT_Draft.s_Strokes.Count() > 0)
-				MDT_Draft.s_Strokes.Remove(MDT_Draft.s_Strokes.Count() - 1);
+			if (MDT_Key(KeyCode.KC_Z))
+				MDT_Draft.Undo();
 			if (MDT_Key(KeyCode.KC_BACK))
-				MDT_Draft.s_Strokes.Clear();
+				MDT_Draft.Clear();
 			if (MDT_Key(KeyCode.KC_RETURN))
 				MDT_SendDraft(scopes);
-			MDT_TrackMouse();
+			if (m_MDT_Tool == 0)
+				MDT_TrackMouse();
+			else
+				MDT_PlaceOnClick();
 			MDT_PanAndZoom(pxPerMetre);
 		}
 		else
@@ -323,7 +416,288 @@ modded class MapMenu
 			MDT_DrawStroke(s, mx, my, pxPerMetre);
 		if (m_MDT_Current)
 			MDT_DrawStroke(m_MDT_Current, mx, my, pxPerMetre);
+		MDT_DrawPreviews(mx, my, pxPerMetre);
 		MDT_ShowBar(scopes);
+	}
+
+	// ---------------------------------------------------------------- markers, text, stamps
+
+	protected void MDT_ListStamps()
+	{
+		m_MDT_StampList.Clear();
+		foreach (string builtin : MDT_STAMPS)
+			m_MDT_StampList.Insert(builtin);
+		foreach (string own : MDT_Draft.OwnStamps())
+			m_MDT_StampList.Insert("file:" + own);
+		if (m_MDT_StampIdx >= m_MDT_StampList.Count())
+			m_MDT_StampIdx = 0;
+	}
+
+	protected string MDT_StampTitle(string stamp)
+	{
+		if (stamp.IndexOf("file:") == 0)
+			return stamp.Substring(5, stamp.Length() - 5) + " (yours)";
+		return stamp;
+	}
+
+	// The texture a stamp preview shows: the mod's PAA, or the player's PNG straight from the folder.
+	protected string MDT_StampTexture(string stamp)
+	{
+		if (stamp.IndexOf("file:") == 0)
+			return MDT_STAMPS_DIR + "/" + stamp.Substring(5, stamp.Length() - 5);
+		return "MapDrawingTool/data/stamps/" + stamp + ".paa";
+	}
+
+	protected void MDT_PlaceOnClick()
+	{
+		bool down = (GetMouseState(MouseState.LEFT) & MB_PRESSED_MASK) != 0;
+		bool click = down && !m_MDT_LeftWas;
+		m_MDT_LeftWas = down;
+		if (!click)
+			return;
+		int x, y;
+		GetMousePos(x, y);
+		vector w = m_MapWidgetInstance.ScreenToMap(Vector(x, y, 0));
+		if (m_MDT_Tool == 1 || m_MDT_Tool == 2)
+		{
+			m_MDT_EditKind = 4;
+			string label = "Marker:";
+			if (m_MDT_Tool == 2)
+			{
+				m_MDT_EditKind = 2;
+				label = "Text:";
+			}
+			m_MDT_EditX = w[0];
+			m_MDT_EditZ = w[2];
+			if (m_MDT_EditLabel)
+				m_MDT_EditLabel.SetText(label);
+			if (m_MDT_EditBox)
+				m_MDT_EditBox.SetText("");
+			if (m_MDT_Edit)
+				m_MDT_Edit.Show(true);
+			SetFocus(m_MDT_EditBox);
+			MDT_Draft.s_Typing = true;
+			return;
+		}
+		if (m_MDT_Tool == 3 && m_MDT_StampList.Count() > 0)
+		{
+			string stamp = m_MDT_StampList[m_MDT_StampIdx];
+			MDT_SubmitStamp st = new MDT_SubmitStamp();
+			st.x = Math.Round(w[0]);
+			st.z = Math.Round(w[2]);
+			st.size = MDT_STAMP_SIZES[m_MDT_StampSize];
+			st.rot = m_MDT_Rot;
+			st.stamp = stamp;
+			if (stamp.IndexOf("file:") == 0)
+			{
+				st.file = stamp.Substring(5, stamp.Length() - 5);
+				if (!MDT_Draft.Upload(st.file))
+					return;
+			}
+			MDT_Draft.s_Stamps.Insert(st);
+			MDT_Draft.Add(3);
+		}
+	}
+
+	// The text box has the keyboard: Enter keeps what was typed, Tab (or Enter on nothing) cancels.
+	protected void MDT_UpdateTyping()
+	{
+		bool done = MDT_Key(KeyCode.KC_RETURN) || MDT_Key(KeyCode.KC_NUMPADENTER);
+		bool cancel = MDT_Key(KeyCode.KC_TAB);
+		if (!done && !cancel)
+			return;
+		string text;
+		if (m_MDT_EditBox)
+			text = m_MDT_EditBox.GetText();
+		text = text.Trim();
+		if (done && text != "")
+		{
+			if (m_MDT_EditKind == 4)
+			{
+				MDT_Marker mk = new MDT_Marker();
+				mk.x = Math.Round(m_MDT_EditX);
+				mk.z = Math.Round(m_MDT_EditZ);
+				mk.text = text.Substring(0, Math.Min(64, text.Length()));
+				mk.icon = m_MDT_Icon;
+				mk.color = MDT_PenColor();
+				MDT_Draft.s_Markers.Insert(mk);
+				MDT_Draft.Add(4);
+			}
+			else
+			{
+				MDT_SubmitText t = new MDT_SubmitText();
+				t.x = Math.Round(m_MDT_EditX);
+				t.z = Math.Round(m_MDT_EditZ);
+				t.text = text.Substring(0, Math.Min(60, text.Length()));
+				t.size = MDT_TEXT_SIZES[m_MDT_TextSize];
+				t.color = MDT_PenColor();
+				t.font = MDT_FONTS[m_MDT_Font];
+				t.rot = m_MDT_Rot;
+				MDT_Draft.s_Texts.Insert(t);
+				MDT_Draft.Add(2);
+			}
+		}
+		if (m_MDT_Edit)
+			m_MDT_Edit.Show(false);
+		SetFocus(null);
+		MDT_Draft.s_Typing = false;
+		m_MDT_LeftWas = true;                       // the click that follows is not a new placement
+	}
+
+	// Widgets showing placed text, stamps and markers (rebuilt when the draft changes, moved every
+	// frame), and the stamp under the mouse.
+	protected void MDT_DrawPreviews(float mx, float my, float pxPerMetre)
+	{
+		if (m_MDT_PrevVersion != MDT_Draft.s_Version)
+		{
+			m_MDT_PrevVersion = MDT_Draft.s_Version;
+			MDT_ClearPreviews();
+			foreach (MDT_SubmitText t : MDT_Draft.s_Texts)
+			{
+				TextWidget tw = TextWidget.Cast(GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_ptext_" + t.font + ".layout", m_MDT_Root));
+				if (tw)
+				{
+					tw.SetText(t.text);
+					int argb = t.color;
+					tw.SetColor(argb);
+				}
+				m_MDT_PrevTexts.Insert(tw);
+			}
+			foreach (MDT_SubmitStamp st : MDT_Draft.s_Stamps)
+				m_MDT_PrevStamps.Insert(MDT_StampWidget(st.stamp));
+			foreach (MDT_Marker mk : MDT_Draft.s_Markers)
+			{
+				ImageWidget icon = ImageWidget.Cast(GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_image.layout", m_MDT_Root));
+				if (icon && icon.LoadImageFile(0, MapMarkerTypes.GetMarkerTypeFromID(mk.icon), true))
+				{
+					icon.SetImage(0);
+					icon.SetColor(mk.color);
+				}
+				m_MDT_PrevMarkers.Insert(icon);
+				TextWidget label = TextWidget.Cast(GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_ptext_bold.layout", m_MDT_Root));
+				if (label)
+				{
+					label.SetText(mk.text);
+					label.SetColor(mk.color);
+				}
+				m_MDT_PrevLabels.Insert(label);
+			}
+		}
+		for (int i = 0; i < MDT_Draft.s_Texts.Count() && i < m_MDT_PrevTexts.Count(); i++)
+		{
+			TextWidget w = TextWidget.Cast(m_MDT_PrevTexts[i]);
+			if (!w)
+				continue;
+			MDT_SubmitText txt = MDT_Draft.s_Texts[i];
+			w.SetTextExactSize(Math.Max(6, txt.size * pxPerMetre));
+			float tw0, th0;
+			w.GetScreenSize(tw0, th0);
+			vector at = m_MapWidgetInstance.MapToScreen(Vector(txt.x, 0, txt.z));
+			w.SetPos(at[0] - mx - tw0 / 2, at[1] - my - th0 / 2);
+		}
+		for (int j = 0; j < MDT_Draft.s_Stamps.Count() && j < m_MDT_PrevStamps.Count(); j++)
+			MDT_PlaceStamp(m_MDT_PrevStamps[j], MDT_Draft.s_Stamps[j].stamp, MDT_Draft.s_Stamps[j].x, MDT_Draft.s_Stamps[j].z, MDT_Draft.s_Stamps[j].size, MDT_Draft.s_Stamps[j].rot, mx, my, pxPerMetre);
+		for (int k = 0; k < MDT_Draft.s_Markers.Count() && k < m_MDT_PrevMarkers.Count(); k++)
+		{
+			vector m = m_MapWidgetInstance.MapToScreen(Vector(MDT_Draft.s_Markers[k].x, 0, MDT_Draft.s_Markers[k].z));
+			if (m_MDT_PrevMarkers[k])
+			{
+				m_MDT_PrevMarkers[k].SetSize(28, 28);
+				m_MDT_PrevMarkers[k].SetPos(m[0] - mx - 14, m[1] - my - 14);
+			}
+			if (m_MDT_PrevLabels[k])
+				m_MDT_PrevLabels[k].SetPos(m[0] - mx + 16, m[1] - my - 12);
+		}
+		// the stamp under the mouse while the stamp tool is on
+		bool ghost = m_MDT_Drawing && m_MDT_Tool == 3 && m_MDT_StampList.Count() > 0 && !MDT_Draft.s_Typing;
+		string want;
+		if (ghost)
+			want = m_MDT_StampList[m_MDT_StampIdx];
+		if (want != m_MDT_GhostStamp)
+		{
+			if (m_MDT_Ghost)
+				m_MDT_Ghost.Unlink();
+			m_MDT_Ghost = null;
+			m_MDT_GhostStamp = want;
+			if (want != "")
+				m_MDT_Ghost = MDT_StampWidget(want);
+		}
+		if (m_MDT_Ghost)
+		{
+			int gx, gy;
+			GetMousePos(gx, gy);
+			vector g = m_MapWidgetInstance.ScreenToMap(Vector(gx, gy, 0));
+			MDT_PlaceStamp(m_MDT_Ghost, want, g[0], g[2], MDT_STAMP_SIZES[m_MDT_StampSize], m_MDT_Rot, mx, my, pxPerMetre);
+			m_MDT_Ghost.SetAlpha(0.6);
+		}
+	}
+
+	protected ImageWidget MDT_StampWidget(string stamp)
+	{
+		ImageWidget w = ImageWidget.Cast(GetGame().GetWorkspace().CreateWidgets("MapDrawingTool/gui/mdt_image.layout", m_MDT_Root));
+		if (!w)
+			return null;
+		string texture = MDT_StampTexture(stamp);
+		if (w.LoadImageFile(0, texture, true))
+			w.SetImage(0);
+		else if (m_MDT_NoPreview.Find(texture) < 0)
+		{
+			m_MDT_NoPreview.Insert(texture);
+			Print("[MapDrawingTool] no preview for " + texture + " (DayZ cannot show it; the web app will)");
+		}
+		return w;
+	}
+
+	// Centre, size and rotation of a stamp preview; stamps DayZ cannot show get an outline instead.
+	protected void MDT_PlaceStamp(Widget w, string stamp, float x, float z, float size, float rot, float mx, float my, float pxPerMetre)
+	{
+		if (!w)
+			return;
+		float side = Math.Max(6, size * pxPerMetre);
+		vector at = m_MapWidgetInstance.MapToScreen(Vector(x, 0, z));
+		w.SetSize(side, side);
+		w.SetPos(at[0] - mx - side / 2, at[1] - my - side / 2);
+		w.SetRotation(0, 0, rot);
+		if (m_MDT_NoPreview.Find(MDT_StampTexture(stamp)) < 0)
+			return;
+		CanvasWidget canvas = MDT_Canvas(255);
+		if (!canvas)
+			return;
+		float x0 = at[0] - mx - side / 2;
+		float y0 = at[1] - my - side / 2;
+		int col = 0xFFFFC107;
+		canvas.DrawLine(x0, y0, x0 + side, y0, 2, col);
+		canvas.DrawLine(x0 + side, y0, x0 + side, y0 + side, 2, col);
+		canvas.DrawLine(x0 + side, y0 + side, x0, y0 + side, 2, col);
+		canvas.DrawLine(x0, y0 + side, x0, y0, 2, col);
+	}
+
+	protected void MDT_ClearPreviews()
+	{
+		foreach (Widget a : m_MDT_PrevTexts)
+		{
+			if (a)
+				a.Unlink();
+		}
+		foreach (Widget b : m_MDT_PrevStamps)
+		{
+			if (b)
+				b.Unlink();
+		}
+		foreach (Widget c : m_MDT_PrevMarkers)
+		{
+			if (c)
+				c.Unlink();
+		}
+		foreach (Widget d : m_MDT_PrevLabels)
+		{
+			if (d)
+				d.Unlink();
+		}
+		m_MDT_PrevTexts.Clear();
+		m_MDT_PrevStamps.Clear();
+		m_MDT_PrevMarkers.Clear();
+		m_MDT_PrevLabels.Clear();
 	}
 
 	// Left mouse down: adds points to the current line, and holds the map still (it would pan).
@@ -386,7 +760,7 @@ modded class MapMenu
 	{
 		if (MDT_Draft.s_Sending)
 			return;
-		if (MDT_Draft.s_Strokes.Count() == 0)
+		if (MDT_Draft.IsEmpty())
 		{
 			MDT_Draft.s_Status = "Draw something first";
 			return;
@@ -401,6 +775,31 @@ modded class MapMenu
 			submit.days = o.lifespans[m_MDT_Life];
 		foreach (MDT_Stroke s : MDT_Draft.s_Strokes)
 			submit.strokes.Insert(s);
+		foreach (MDT_SubmitText t : MDT_Draft.s_Texts)
+			submit.texts.Insert(t);
+		foreach (MDT_Marker mk : MDT_Draft.s_Markers)
+			submit.markers.Insert(mk);
+		foreach (MDT_SubmitStamp st : MDT_Draft.s_Stamps)
+		{
+			MDT_SubmitStamp send = new MDT_SubmitStamp();
+			send.x = st.x;
+			send.z = st.z;
+			send.size = st.size;
+			send.rot = st.rot;
+			send.stamp = st.stamp;
+			if (st.file != "")
+			{
+				string id;
+				MDT_Draft.s_Uploads.Find(st.file, id);
+				if (id == "")
+				{
+					MDT_Draft.s_Status = "Wait until stamp " + st.file + " has uploaded";
+					return;
+				}
+				send.stamp = "upload:" + id;
+			}
+			submit.stamps.Insert(send);
+		}
 		string json, error;
 		JsonFileLoader<MDT_Submit>.MakeData(submit, json, error, false);
 		PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
@@ -627,8 +1026,18 @@ modded class MapMenu
 			string keep = "kept permanently";
 			if (o.lifespans && m_MDT_Life >= 0 && m_MDT_Life < o.lifespans.Count() && o.lifespans[m_MDT_Life] > 0)
 				keep = "kept " + o.lifespans[m_MDT_Life].ToString() + " days";
-			text = "DRAWING    " + MDT_PenName() + " pen    " + MDT_WIDTHS[m_MDT_Width].ToString() + " m line    " + who + "    " + keep;
-			text += "    " + MDT_Draft.s_Strokes.Count().ToString() + " lines";
+			text = "DRAWING    " + MDT_TOOLS[m_MDT_Tool] + "    " + MDT_PenName() + " colour    ";
+			if (m_MDT_Tool == 0)
+				text += MDT_WIDTHS[m_MDT_Width].ToString() + " m line    ";
+			else if (m_MDT_Tool == 1)
+				text += MDT_ICONS[m_MDT_Icon] + " icon    ";
+			else if (m_MDT_Tool == 2)
+				text += MDT_FONT_NAMES[m_MDT_Font] + " " + MDT_TEXT_SIZES[m_MDT_TextSize].ToString() + " m, turned " + m_MDT_Rot.ToString() + "°    ";
+			else if (m_MDT_StampList.Count() > 0)
+				text += MDT_StampTitle(m_MDT_StampList[m_MDT_StampIdx]) + " " + MDT_STAMP_SIZES[m_MDT_StampSize].ToString() + " m, turned " + m_MDT_Rot.ToString() + "°    ";
+			text += who + "    " + keep;
+			int items = MDT_Draft.s_Strokes.Count() + MDT_Draft.s_Texts.Count() + MDT_Draft.s_Stamps.Count() + MDT_Draft.s_Markers.Count();
+			text += "    " + items.ToString() + " items";
 		}
 		if (MDT_Draft.s_Status != "")
 			text += "      " + MDT_Draft.s_Status;
@@ -636,9 +1045,11 @@ modded class MapMenu
 
 		int mode = 0;
 		if (m_MDT_Drawing)
-			mode = 1;
+			mode = 10 + m_MDT_Tool;
 		if (m_MDT_Browse)
 			mode = 2;
+		if (MDT_Draft.s_Typing)
+			mode = 3;
 		if (mode == m_MDT_BarMode)
 			return;
 		m_MDT_BarMode = mode;
@@ -654,6 +1065,11 @@ modded class MapMenu
 			MDT_AddKey("D", "start drawing");
 			MDT_AddKey("X", "my drawings");
 		}
+		else if (mode == 3)
+		{
+			MDT_AddKey("Enter", "keep it");
+			MDT_AddKey("Tab", "cancel");
+		}
 		else if (mode == 2)
 		{
 			MDT_AddKey("Left  Right", "previous / next");
@@ -664,17 +1080,36 @@ modded class MapMenu
 		}
 		else
 		{
-			MDT_AddKey("Left mouse", "draw");
+			MDT_AddKey("1-4", "pen marker text stamp");
+			if (m_MDT_Tool == 0)
+				MDT_AddKey("Left mouse", "draw");
+			else
+				MDT_AddKey("Left mouse", "place");
 			MDT_AddKey("Right mouse", "move map");
 			MDT_AddKey("Wheel  + -", "zoom");
+			if (m_MDT_Tool == 0)
+				MDT_AddKey("W", "line width");
+			if (m_MDT_Tool == 1)
+				MDT_AddKey("[ ]", "icon");
+			if (m_MDT_Tool == 2)
+			{
+				MDT_AddKey("F", "font");
+				MDT_AddKey("W", "size");
+				MDT_AddKey("Q E", "turn");
+			}
+			if (m_MDT_Tool == 3)
+			{
+				MDT_AddKey("[ ]", "stamp");
+				MDT_AddKey("W", "size");
+				MDT_AddKey("Q E", "turn");
+			}
+			MDT_AddKey("C", "colour");
 			MDT_AddKey("Z", "undo");
 			MDT_AddKey("Backspace", "clear");
-			MDT_AddKey("C", "pen colour");
-			MDT_AddKey("W", "line width");
 			MDT_AddKey("G", "who sees it");
 			MDT_AddKey("L", "how long");
 			MDT_AddKey("Enter", "send");
-			MDT_AddKey("X", "my drawings");
+			MDT_AddKey("X", "mine");
 			MDT_AddKey("D", "stop");
 		}
 		m_MDT_BarKeys.Update();
@@ -760,8 +1195,10 @@ modded class MissionGameplay
 		super.OnUpdate(timeslice);
 		MDT_Live.Update(timeslice);
 		MDT_UpdatePaper(timeslice);
+		MDT_Watch.Update(timeslice);
 
-		if (!CfgGameplayHandler.GetUse3DMap() || !KeyState(KeyCode.KC_M))
+		MDT_Draft.Update();
+		if (MDT_Draft.s_Typing || !CfgGameplayHandler.GetUse3DMap() || !KeyState(KeyCode.KC_M))
 			return;
 		ClearKey(KeyCode.KC_M);
 

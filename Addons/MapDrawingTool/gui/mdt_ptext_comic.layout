@@ -1,0 +1,16 @@
+TextWidgetClass MDTPreviewText {
+ ignorepointer 1
+ color 1 1 1 1
+ position 0 0
+ size 400 40
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ text ""
+ font "gui/fonts/amorserifpro"
+ "exact text" 1
+ "exact text size" 20
+ "size to text h" 1
+ "size to text v" 1
+}

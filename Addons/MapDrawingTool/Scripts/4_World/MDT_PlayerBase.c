@@ -12,6 +12,22 @@ modded class PlayerBase
 				MDT_Events.SubmitPiece.Invoke(this, sender, pIndex, pCount, piece);
 			return;
 		}
+		if (rpc_type == MDT_RPC_UPLOAD && GetGame().IsServer())
+		{
+			int uIndex, uCount;
+			string uText;
+			if (ctx.Read(uIndex) && ctx.Read(uCount) && ctx.Read(uText))
+				MDT_Events.UploadPiece.Invoke(this, sender, uIndex, uCount, uText);
+			return;
+		}
+		if (rpc_type == MDT_RPC_UPLOADED && GetGame().IsClient())
+		{
+			string upName, upId, upError;
+			bool upOk;
+			if (ctx.Read(upName) && ctx.Read(upOk) && ctx.Read(upId) && ctx.Read(upError))
+				MDT_Draft.OnUploaded(upName, upOk, upId, upError);
+			return;
+		}
 		if (rpc_type == MDT_RPC_MINE_ASK && GetGame().IsServer())
 		{
 			MDT_Events.MineAsk.Invoke(this, sender);
@@ -22,6 +38,18 @@ modded class PlayerBase
 			string withdrawId;
 			if (ctx.Read(withdrawId))
 				MDT_Events.Withdraw.Invoke(this, sender, withdrawId);
+			return;
+		}
+		if (rpc_type == MDT_RPC_PAPER_ASK && GetGame().IsServer())
+		{
+			MDT_Events.PaperAsk.Invoke(this, sender);
+			return;
+		}
+		if (rpc_type == MDT_RPC_PAPER && GetGame().IsClient())
+		{
+			string paperJson;
+			if (ctx.Read(paperJson))
+				MDT_Watch.OnPaper(this, paperJson);
 			return;
 		}
 		if (rpc_type == MDT_RPC_MINE && GetGame().IsClient())

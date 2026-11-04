@@ -42,6 +42,7 @@ class MDT_Download
 	ref array<int> words;   // current part, being written
 	int pos;                // next word in words
 	bool waiting;
+	bool other;             // another player's paper texture (watching their map), not ours
 }
 
 class MDT_Live
@@ -53,6 +54,7 @@ class MDT_Live
 	static int s_ReadyCount;                     // bumps whenever an image becomes drawable
 	static ref map<string, string> s_ImagePaths = new map<string, string>;   // layer id -> cached PAA
 	static string s_PaperPath;                   // cached paper map texture, "" until there is one
+	static ref array<string> s_Others = new array<string>;   // other players' paper textures in use (kept by CleanCache)
 
 	protected static string s_Version;
 	protected static ref array<string> s_Chunks;
@@ -140,6 +142,8 @@ class MDT_Live
 			keep.Insert(kept);
 		if (s_PaperPath != "")
 			keep.Insert(s_PaperPath);
+		foreach (string other : s_Others)
+			keep.Insert(other);
 		string name;
 		FileAttr attr;
 		array<string> drop = new array<string>;
@@ -164,6 +168,26 @@ class MDT_Live
 		}
 		if (removed > 0)
 			Print("[MapDrawingTool] cache: removed " + removed + " old files");
+	}
+
+	// Another player's paper texture (MDT_Watch): downloaded after our own work, once.
+	static string QueueOther(MDT_Layer paper)
+	{
+		if (!paper || paper.hash == "" || paper.parts <= 0 || s_Base == "")
+			return "";
+		string path = MDT_CACHE_DIR + "/paper_" + paper.hash + ".paa";
+		if (s_Others.Find(path) < 0)
+			s_Others.Insert(path);
+		if (FileExist(path))
+			return path;
+		foreach (MDT_Download queued : s_Queue)
+		{
+			if (queued.path == path)
+				return path;
+		}
+		Queue(paper, path);
+		s_Queue[s_Queue.Count() - 1].other = true;
+		return path;
 	}
 
 	protected static void Queue(MDT_Layer layer, string path)
@@ -231,9 +255,10 @@ class MDT_Live
 		DeleteFile(job.path);
 		if (CopyFile(job.temp, job.path))
 		{
-			if (job.layer.kind == "paper")
+			// another player's texture: MDT_Watch sees the file appear
+			if (!job.other && job.layer.kind == "paper")
 				s_PaperPath = job.path;
-			else
+			else if (!job.other)
 				s_ImagePaths.Set(job.layer.id, job.path);
 			s_ReadyCount++;
 			Print(string.Format("[MapDrawingTool] downloaded %1 %2 (%3 bytes, %4 s, %5 ticks/ms)", job.layer.kind, job.layer.id, job.layer.bytes, (GetGame().GetTime() - job.started) / 1000.0, s_TicksPerMs));
