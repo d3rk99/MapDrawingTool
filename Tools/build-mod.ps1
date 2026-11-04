@@ -71,5 +71,7 @@ foreach ($addon in $addons) {
 
 & (Join-Path $PSScriptRoot 'sign-derk.ps1') -ModPath $Destination
 Copy-Item -LiteralPath (Join-Path $repo "Mod\mod.cpp") -Destination $Destination -Force
+# meta.cpp carries the Workshop id (3833411645); without it the Publisher writes publishedid = 0
+Copy-Item -LiteralPath (Join-Path $repo "Mod\meta.cpp") -Destination $Destination -Force
 Copy-Item -LiteralPath (Join-Path $stage "manifest.json") -Destination $Destination -Force
 Write-Host "Live markers per world (copy to the server's profiles\MapDrawingTool\markers.json): $(Join-Path $stage 'profile')"
