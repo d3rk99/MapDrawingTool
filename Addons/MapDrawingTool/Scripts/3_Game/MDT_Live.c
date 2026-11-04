@@ -7,21 +7,31 @@
 // Parts used to be hex decoded with Substring: script strings are values, so each word copied the
 // whole part, and a 2.4 MB download held the game at a few FPS for 40 s (2026-11-03).
 
+// One per request, holding its download: a manifest that arrives mid-download replaces the queue,
+// and the cancelled request's answer must not be written into the next file (2026-11-03: a paper
+// texture part ended up in a layer's PAA).
 class MDT_PartCallback : RestCallback
 {
+	ref MDT_Download m_Job;
+
+	void MDT_PartCallback(MDT_Download job)
+	{
+		m_Job = job;
+	}
+
 	override void OnSuccess(string data, int dataSize)
 	{
-		MDT_Live.OnPart(data);
+		MDT_Live.OnPart(m_Job, data);
 	}
 
 	override void OnError(int errorCode)
 	{
-		MDT_Live.OnPartFailed("error " + errorCode);
+		MDT_Live.OnPartFailed(m_Job, "error " + errorCode);
 	}
 
 	override void OnTimeout()
 	{
-		MDT_Live.OnPartFailed("timeout");
+		MDT_Live.OnPartFailed(m_Job, "timeout");
 	}
 }
 
@@ -60,7 +70,7 @@ class MDT_Live
 	protected static string s_Version;
 	protected static ref array<string> s_Chunks;
 	protected static ref array<ref MDT_Download> s_Queue = new array<ref MDT_Download>;
-	protected static ref MDT_PartCallback s_Callback = new MDT_PartCallback();
+	protected static ref MDT_PartCallback s_Callback;   // the request in flight (kept alive until it answers)
 	protected static ref JsonSerializer s_Json = new JsonSerializer();
 	protected static bool s_CleanPending;          // tidy the cache once this manifest's downloads are done
 	protected static int s_LastTick;
@@ -95,6 +105,15 @@ class MDT_Live
 		}
 		s_Manifest = manifest;
 		s_Base = base;
+		array<ref MDT_Download> again = new array<ref MDT_Download>;   // not from the manifest: start over
+		foreach (MDT_Download dropped : s_Queue)
+		{
+			if (dropped.file)
+				dropped.file.Close();
+			DeleteFile(dropped.temp);
+			if (dropped.other || dropped.layer.kind == "stamp")
+				again.Insert(dropped);
+		}
 		s_Queue.Clear();
 		s_ImagePaths.Clear();
 		if (!FileExist(MDT_PROFILE_DIR))
@@ -127,6 +146,11 @@ class MDT_Live
 		}
 		else
 			s_PaperPath = "";
+		foreach (MDT_Download redo : again)
+		{
+			Queue(redo.layer, redo.path);
+			s_Queue[s_Queue.Count() - 1].other = redo.other;
+		}
 		s_ReadyCount++;
 		s_CleanPending = true;
 		Print(string.Format("[MapDrawingTool] manifest %1: %2 markers, %3 layers, %4 to download", manifest.version, manifest.markers.Count(), manifest.layers.Count(), s_Queue.Count()));
@@ -325,31 +349,30 @@ class MDT_Live
 		string url = "api/" + mapId + "/live/" + job.layer.id + "/" + job.part;
 		if (job.layer.query != "")
 			url += "?" + job.layer.query;               // personal work: the key only its owner gets
+		s_Callback = new MDT_PartCallback(job);
 		api.GetRestContext(s_Base).GET(s_Callback, url);
 	}
 
-	static void OnPart(string data)
+	static void OnPart(MDT_Download job, string data)
 	{
-		if (s_Queue.Count() == 0)
-			return;
-		MDT_Download job = s_Queue[0];
+		if (s_Queue.Count() == 0 || s_Queue[0] != job)
+			return;                                    // cancelled by a newer manifest
 		job.waiting = false;
 		MDT_Part part;
 		string error;
 		if (!s_Json.ReadFromString(part, data, error) || !part || !part.d || part.d.Count() == 0)
 		{
-			OnPartFailed("bad part " + error);
+			OnPartFailed(job, "bad part " + error);
 			return;
 		}
 		job.words = part.d;
 		job.pos = 0;
 	}
 
-	static void OnPartFailed(string why)
+	static void OnPartFailed(MDT_Download job, string why)
 	{
-		if (s_Queue.Count() == 0)
+		if (s_Queue.Count() == 0 || s_Queue[0] != job)
 			return;
-		MDT_Download job = s_Queue[0];
 		job.waiting = false;
 		job.tries++;
 		Print("[MapDrawingTool] layer " + job.layer.id + " part " + job.part + " failed: " + why);

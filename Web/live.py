@@ -17,13 +17,11 @@ dropped the game to a few FPS for the length of a 2.4 MB download.
 import hashlib
 import json
 import os
-import subprocess
-import tempfile
 
 from PIL import Image
 
 import compose_layers
-import paths
+import paa as paa_writer         # PAA without DayZ Tools
 from compose_layers import px_per_metre
 
 PART_BYTES = 32 * 1024      # bytes per part (about 90 KB of JSON; one native parse per part)
@@ -113,10 +111,7 @@ def build_image(world_info, sub_path, sub):
     # The layer was painted at texture resolution; upscaling 2x keeps edges smooth when zoomed in.
     img = img.resize((_pot(img.width * 2), _pot(img.height * 2)), Image.LANCZOS)
     paa = os.path.join(sub_path, "live.paa")
-    with tempfile.TemporaryDirectory() as tmp:
-        png = os.path.join(tmp, "live_ca.png")         # _ca: ImageToPAA keeps the alpha channel
-        img.save(png)
-        subprocess.run([paths.image_to_paa(), png, paa], check=True, capture_output=True, timeout=120)
+    paa_writer.save(img, paa, alpha=True)
     data = open(paa, "rb").read()
     x0, z1 = tex_to_world(world_info, cx0, cy0)
     x1, z0 = tex_to_world(world_info, cx1, cy1)
@@ -131,8 +126,9 @@ def ensure_live(world_info, sub_path, sub):
     if os.path.isfile(meta_path):
         with open(meta_path, encoding="utf-8") as f:
             entry = json.load(f)
-        if entry.get("kind") != "strokes" or entry.get("rev") == 2:
-            return entry                   # older stroke entries are rebuilt below
+        missing = entry.get("kind") == "image" and not os.path.isfile(os.path.join(sub_path, "live.paa"))
+        if not missing and (entry.get("kind") != "strokes" or entry.get("rev") == 2):
+            return entry                   # older stroke entries and lost PAAs are rebuilt below
     # In game a line can only be see-through by its colour's alpha, which darkens wherever pieces
     # overlap (Test/README.md). A drawing with any see-through stroke goes live as its image, which
     # the editor painted one whole stroke at a time; fully opaque drawings stay sharp lines.
@@ -167,10 +163,7 @@ def build_paper(world, approved, sub_path_of, paper_dir):
     if not os.path.isfile(paa):
         os.makedirs(paper_dir, exist_ok=True)
         img, _ = compose_layers.paint_layers(world, layers)
-        with tempfile.TemporaryDirectory() as tmp:
-            png = os.path.join(tmp, "paper_co.png")     # _co: colour texture, like karta_co
-            img.convert("RGB").save(png)
-            subprocess.run([paths.image_to_paa(), png, paa + ".tmp"], check=True, capture_output=True, timeout=300)
+        paa_writer.save(img.convert("RGB"), paa + ".tmp", alpha=False)
         os.replace(paa + ".tmp", paa)
         for old in os.listdir(paper_dir):
             if old != name and old.startswith("paper_"):
@@ -192,10 +185,7 @@ def stamp_preview(png, paa, side=256):
         img.thumbnail((side, side), Image.LANCZOS)
         square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
         square.paste(img, ((side - img.width) // 2, (side - img.height) // 2))
-        with tempfile.TemporaryDirectory() as tmp:
-            src = os.path.join(tmp, "stamp_ca.png")      # _ca: ImageToPAA keeps the alpha channel
-            square.save(src)
-            subprocess.run([paths.image_to_paa(), src, paa + ".tmp"], check=True, capture_output=True, timeout=60)
+        paa_writer.save(square, paa + ".tmp", alpha=True)
         os.replace(paa + ".tmp", paa)
     return -(-os.path.getsize(paa) // PART_BYTES)
 

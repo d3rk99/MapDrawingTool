@@ -23,7 +23,9 @@ import sys
 
 from PIL import Image
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# MDT_ROOT: the packaged MapDrawingTool.exe sets it to its own folder (same layout as the repo)
+HERE = (os.path.join(os.environ["MDT_ROOT"], "Tools") if os.environ.get("MDT_ROOT")
+        else os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(HERE)
 
 

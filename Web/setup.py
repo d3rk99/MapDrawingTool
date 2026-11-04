@@ -1,4 +1,4 @@
-"""First-time setup for server owners (setup.bat runs it after installing the Python packages).
+"""Developer setup when running from source (owners use MapDrawingTool.exe, which ships the map images).
 
 Finds DayZ (game or server) and DayZ Tools through Steam, makes the map images the editor shows
 from the game's own map textures, and writes Web/config.json with a new admin token.
@@ -46,7 +46,7 @@ def main():
     import app  # noqa: E402,F401  (writes config.json with a new admin token on first run)
     print(f"\nMaps ready: {', '.join(made)}")
     print(f"Settings file: {os.path.join(HERE, 'config.json')} (holds your admin token: keep it private)")
-    print("\nNext: run start.bat, open http://127.0.0.1:8640/admin, paste the admin token from config.json,")
+    print("\nNext: run python -I Web/app.py, open http://127.0.0.1:8640/admin, paste the admin token from config.json,")
     print("and set everything else on the Settings tab. SERVER_SETUP.md has the full steps.")
 
 

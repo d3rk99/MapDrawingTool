@@ -30,7 +30,9 @@ import threading
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 from PIL import Image
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# MDT_ROOT: the packaged MapDrawingTool.exe sets it to its own folder (same layout as the repo)
+HERE = (os.path.join(os.environ["MDT_ROOT"], "Web") if os.environ.get("MDT_ROOT")
+        else os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(HERE)
 TOOLS = os.path.join(REPO, "Tools")
 sys.path.insert(0, TOOLS)
@@ -57,7 +59,7 @@ def load_config():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=1)
         print(f"Wrote {CONFIG_PATH} with a new admin token (open the file to read it).")
-    with open(CONFIG_PATH, encoding="utf-8") as f:
+    with open(CONFIG_PATH, encoding="utf-8-sig") as f:
         cfg = json.load(f)
     changed = False
     if not cfg.get("sessionSecret"):               # signs player sign-in cookies (access.py)

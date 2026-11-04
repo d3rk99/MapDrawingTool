@@ -9,10 +9,8 @@ hand and the M map) within a minute or two. Two parts: the **mod** on your DayZ 
 - A Windows PC or VPS that stays on while players use the map: your own PC, the PC running your
   DayZ server, or a Windows VPS. Rented game-server panels (Nitrado, GTX...) can't run it; use a
   separate machine and point the server at it.
-- **Python 3.10+** from python.org (tick "Add python.exe to PATH" in the installer).
-- **DayZ Tools** (free, Steam > Library > Tools).
-- **DayZ** or **DayZ Server** installed on the same PC (Steam). The web app reads the map textures
-  from it. For Livonia, Sakhal and Nasdara the DLC files must be installed.
+- Nothing else: no Python, no DayZ Tools, no DayZ install. The package has the four official maps
+  (Chernarus, Livonia, Sakhal, Nasdara) and makes the game's textures itself.
 
 ## 1. Install the mod
 
@@ -23,10 +21,11 @@ hand and the M map) within a minute or two. Two parts: the **mod** on your DayZ 
 ## 2. Set up the web app
 
 1. Unzip this package somewhere permanent, e.g. `C:\MapDrawingTool`.
-2. Run **setup.bat**. It installs the Python packages, finds DayZ and DayZ Tools, makes a map image
-   for each installed map, and writes `Web\config.json` with your **admin token**.
-3. Run **start.bat** and leave the window open. The web app is now at `http://127.0.0.1:8640`.
-4. Open `http://127.0.0.1:8640/admin`, paste the `adminToken` from `Web\config.json`, click Open.
+2. Run **MapDrawingTool.exe** and leave the window open. The first start writes `Web\config.json`
+   with your **admin token**. The web app is now at `http://127.0.0.1:8640`.
+   Windows may say "Windows protected your PC" (the exe is not code-signed): click More info, then
+   Run anyway.
+3. Open `http://127.0.0.1:8640/admin`, paste the `adminToken` from `Web\config.json`, click Open.
    Everything else is on the **Settings** tab.
 
 ## 3. Let players reach it
@@ -56,7 +55,7 @@ Edit `profiles\MapDrawingTool\config.json` on the DayZ server and restart it:
   (`chernarusplus`, `enoch`, `sakhal`, `nasdara`). Two servers with the same `mapId` share drawings.
 
 **Several servers on the same terrain with different drawings:** add maps to `Web\config.json`,
-restart start.bat, and give each server its map's id:
+restart MapDrawingTool.exe, and give each server its map's id:
 
 ```json
 "maps": [
@@ -89,14 +88,16 @@ approve on `/admin`. Approved work appears in game within a minute or two, no re
 
 ## Updating
 
-Download the new package, unzip it over the old folder (your `Web\config.json` and `Submissions`
-folder stay), and run setup.bat again.
+Close MapDrawingTool.exe, unzip the new package over the old folder (your `Web\config.json`,
+`Submissions` and `Build` folders stay), and start it again.
+
+Coming from 0.1.0 or 0.2.0 (the Python version): unzip into the same folder the same way. The
+old `setup.bat`, `start.bat` and `.py` files are no longer used and can be deleted.
 
 ## Troubleshooting
 
 - **Players see nothing in game:** the server's `liveUrl` must be the public address, reachable
   from outside your network. Check the server's script log for `[MapDrawingTool]` lines.
-- **setup.bat: ImageToPAA not found:** install DayZ Tools, or set `"imageToPaa"` in `Web\config.json`
-  to the full path of `ImageToPAA.exe`.
-- **A map is missing in the editor:** its files are not installed (DLC); install them and run setup.bat.
-- **DayZ installed outside Steam's usual places:** set `"dayzPath"` in `Web\config.json`.
+- **The window closes or shows an error at start:** the message says what is wrong, most often a typo
+  in `Web\config.json` or port 8640 already in use (another copy running; change `"port"`).
+- **Antivirus removes the exe:** some flag unsigned programs; allow the MapDrawingTool folder.

@@ -8,7 +8,9 @@ import json
 import os
 import re
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# MDT_ROOT: the packaged MapDrawingTool.exe sets it to its own folder (same layout as the repo)
+HERE = (os.path.join(os.environ["MDT_ROOT"], "Tools") if os.environ.get("MDT_ROOT")
+        else os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(HERE)
 CONFIG = os.path.join(REPO, "Web", "config.json")
 TO_PAA_REL = os.path.join("DayZ Tools", "Bin", "ImageToPAA", "ImageToPAA.exe")
@@ -16,7 +18,7 @@ TO_PAA_REL = os.path.join("DayZ Tools", "Bin", "ImageToPAA", "ImageToPAA.exe")
 
 def _config():
     try:
-        with open(CONFIG, encoding="utf-8") as f:
+        with open(CONFIG, encoding="utf-8-sig") as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
