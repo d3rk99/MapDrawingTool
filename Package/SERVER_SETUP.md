@@ -79,7 +79,7 @@ approve on `/admin`. Approved work appears in game within a minute or two, no re
 ## 6. Let pens spawn
 
 Drawing in game needs a pen, and vanilla DayZ never spawns them (`nominal` 0 in types.xml). The
-`types` folder in this package has `mdt_types.xml`: Pen_Black, Pen_Red, Pen_Green and Pen_Blue on
+`types` folder in this package, and in the mod folder `@MapDrawingTool\types`, has `mdt_types.xml`: Pen_Black, Pen_Red, Pen_Green and Pen_Blue on
 shelves in towns, villages and offices, about 6 of each. `types\README.txt` shows how to add it to
 your mission's economy (its own file through cfgeconomycore.xml, or pasted into db	ypes.xml).
 

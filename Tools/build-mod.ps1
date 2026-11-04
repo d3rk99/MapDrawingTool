@@ -73,5 +73,9 @@ foreach ($addon in $addons) {
 Copy-Item -LiteralPath (Join-Path $repo "Mod\mod.cpp") -Destination $Destination -Force
 # meta.cpp carries the Workshop id (3833411645); without it the Publisher writes publishedid = 0
 Copy-Item -LiteralPath (Join-Path $repo "Mod\meta.cpp") -Destination $Destination -Force
+# pen spawns for the server's economy, next to Addons and Keys (owners copy it into their mission)
+$types = Join-Path $Destination "types"
+if (Test-Path $types) { Remove-Item -LiteralPath $types -Recurse -Force }
+Copy-Item -LiteralPath (Join-Path $repo "Package\types") -Destination $types -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $stage "manifest.json") -Destination $Destination -Force
 Write-Host "Live markers per world (copy to the server's profiles\MapDrawingTool\markers.json): $(Join-Path $stage 'profile')"

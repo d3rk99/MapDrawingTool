@@ -76,7 +76,7 @@ Settings > Game servers on the web app shows these lines ready to copy.
 Players open your web app address, or just draw in game. You approve on /admin.
 
 [h3]5. Let pens spawn[/h3]
-Drawing in game needs a pen, and vanilla DayZ never spawns them (nominal 0). The download has [b]types\mdt_types.xml[/b] (also [url=https://github.com/d3rk99/MapDrawingTool/tree/main/Package/types]on GitHub[/url]): the four pens on shelves in towns, villages and offices, about 6 of each. Copy it to a folder [b]mapdrawingtool[/b] in your mission folder and add to [b]cfgeconomycore.xml[/b] inside <economycore>:
+Drawing in game needs a pen, and vanilla DayZ never spawns them (nominal 0). The mod itself has [b]types\mdt_types.xml[/b], next to Addons and Keys (in @MapDrawingTool, or the Workshop folder 3833411645; also in the web app download and [url=https://github.com/d3rk99/MapDrawingTool/tree/main/Package/types]on GitHub[/url]): the four pens on shelves in towns, villages and offices, about 6 of each. Copy it to a folder [b]mapdrawingtool[/b] in your mission folder and add to [b]cfgeconomycore.xml[/b] inside <economycore>:
 [code]<ce folder="mapdrawingtool">
     <file name="mdt_types.xml" type="types" />
 </ce>[/code]
