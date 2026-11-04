@@ -44,6 +44,12 @@ Players pick the map in the editor; `http://.../?map=<id>` opens one directly.
   server (`MDT_RPC_SUBMIT`), which adds the player's SteamID and the `serverKey` from its
   `profiles\MapDrawingTool\config.json` and posts them to `/api/<map>/ingame`. The web app renders
   them into a normal layer submission (approval, webhooks, admin page as usual).
+- **In-game tools** (1–4): line, marker, text (5 fonts), stamp. Stamps are the 9 built-in ones
+  plus the player's own PNGs (up to 96 KB) from `%LOCALAPPDATA%\DayZ\MapDrawingTool\stamps`.
+  Picking one with `]` uploads it through the game server (`MDT_RPC_UPLOAD`, raw ints in small
+  pieces) to `/api/<map>/ingame/upload`, which keeps the PNG per SteamID and returns a 256 px PAA
+  preview the game downloads like a layer (DayZ cannot show PNGs; never hand one to
+  `LoadImageFile`).
 - Per map in Settings: allow global / personal, personal needs approval, longest and default
   lifespan, drawing in game. `serverKey` is on Settings > Game servers.
 

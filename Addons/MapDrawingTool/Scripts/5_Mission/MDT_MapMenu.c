@@ -375,6 +375,9 @@ modded class MapMenu
 					m_MDT_StampIdx = (m_MDT_StampIdx + 1) % n;
 				else
 					m_MDT_StampIdx = (m_MDT_StampIdx + n - 1) % n;
+				string picked = m_MDT_StampList[m_MDT_StampIdx];
+				if (picked.IndexOf("file:") == 0)       // upload now, so the preview is back before placing
+					MDT_Draft.Upload(picked.Substring(5, picked.Length() - 5));
 			}
 			if (MDT_Key(KeyCode.KC_C))
 			{
@@ -444,7 +447,13 @@ modded class MapMenu
 	protected string MDT_StampTexture(string stamp)
 	{
 		if (stamp.IndexOf("file:") == 0)
-			return MDT_STAMPS_DIR + "/" + stamp.Substring(5, stamp.Length() - 5);
+		{
+			string file = stamp.Substring(5, stamp.Length() - 5);
+			string preview;
+			if (MDT_Live.s_StampPaths.Find(file, preview))
+				return preview;                     // the web app's PAA of it
+			return MDT_STAMPS_DIR + "/" + file;     // never loaded (see MDT_StampWidget): an outline
+		}
 		return "MapDrawingTool/data/stamps/" + stamp + ".paa";
 	}
 
@@ -613,12 +622,15 @@ modded class MapMenu
 		string want;
 		if (ghost)
 			want = m_MDT_StampList[m_MDT_StampIdx];
-		if (want != m_MDT_GhostStamp)
+		string wantKey = want;
+		if (want != "")
+			wantKey = want + "|" + MDT_StampTexture(want);   // rebuilt when a stamp's preview arrives
+		if (wantKey != m_MDT_GhostStamp)
 		{
 			if (m_MDT_Ghost)
 				m_MDT_Ghost.Unlink();
 			m_MDT_Ghost = null;
-			m_MDT_GhostStamp = want;
+			m_MDT_GhostStamp = wantKey;
 			if (want != "")
 				m_MDT_Ghost = MDT_StampWidget(want);
 		}
@@ -638,6 +650,14 @@ modded class MapMenu
 		if (!w)
 			return null;
 		string texture = MDT_StampTexture(stamp);
+		// Never hand a player's PNG to LoadImageFile (DayZ cannot show PNGs); its PAA preview from the
+		// web app is fine. Until that arrives, an outline.
+		if (stamp.IndexOf("file:") == 0 && texture.IndexOf(".paa") != texture.Length() - 4)
+		{
+			if (m_MDT_NoPreview.Find(texture) < 0)
+				m_MDT_NoPreview.Insert(texture);
+			return w;
+		}
 		if (w.LoadImageFile(0, texture, true))
 			w.SetImage(0);
 		else if (m_MDT_NoPreview.Find(texture) < 0)

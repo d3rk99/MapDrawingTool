@@ -177,7 +177,8 @@ modded class MissionServer
 	protected ref map<string, ref MDT_Personal> m_MDT_Personal = new map<string, ref MDT_Personal>;
 	protected ref map<string, string> m_MDT_PersonalVer = new map<string, string>;
 	protected ref array<ref MDT_PersonalCallback> m_MDT_PersonalWaiting = new array<ref MDT_PersonalCallback>;
-	protected ref map<string, ref array<string>> m_MDT_UpPieces = new map<string, ref array<string>>;
+	protected ref map<string, ref MDT_Upload> m_MDT_UpPieces = new map<string, ref MDT_Upload>;   // SteamID -> upload being received
+	protected ref map<string, int> m_MDT_UpNext = new map<string, int>;
 	protected ref array<ref MDT_UploadCallback> m_MDT_UpWaiting = new array<ref MDT_UploadCallback>;
 	protected string m_MDT_Version;
 	protected string m_MDT_Rejected;       // last manifest refused for being another world's (logged once)
@@ -585,43 +586,81 @@ modded class MissionServer
 		rpc.Send(holder, MDT_RPC_PAPER, true, viewer);
 	}
 
-	// A piece of a stamp PNG from the player's folder; the whole file goes to the web app.
-	void MDT_OnUploadPiece(Man man, PlayerIdentity sender, int index, int count, string text)
+	// A piece of a stamp PNG from the player's folder (raw ints); the whole file goes to the web app.
+	void MDT_OnUploadPiece(Man man, PlayerIdentity sender, int index, int count, string name, int bytes, array<int> words)
 	{
-		if (!sender || count < 1 || count > 400 || index < 0 || index >= count)
+		if (!sender || !words)
 			return;
 		string uid = sender.GetPlainId();
-		array<string> pieces;
-		if (index == 0 || !m_MDT_UpPieces.Find(uid, pieces))
+		int maxPieces = (MDT_UPLOAD_MAX_WORDS + MDT_UPLOAD_PIECE - 1) / MDT_UPLOAD_PIECE;
+		if (count < 1 || count > maxPieces || index < 0 || index >= count || words.Count() > MDT_UPLOAD_PIECE)
 		{
-			pieces = new array<string>;
-			m_MDT_UpPieces.Set(uid, pieces);
+			MDT_UploadReply(uid, name, false, "", "", 0, "the stamp arrived damaged");
+			return;
 		}
-		pieces.Insert(text);
-		if (pieces.Count() < count)
+		MDT_Upload up;
+		int next;
+		if (index == 0)
+		{
+			up = new MDT_Upload();
+			up.name = name;
+			up.bytes = bytes;
+			m_MDT_UpPieces.Set(uid, up);
+			m_MDT_UpNext.Set(uid, 0);
+		}
+		if (!m_MDT_UpPieces.Find(uid, up) || !m_MDT_UpNext.Find(uid, next) || next != index || up.name != name)
+		{
+			m_MDT_UpPieces.Remove(uid);
+			m_MDT_UpNext.Remove(uid);
+			MDT_UploadReply(uid, name, false, "", "", 0, "pieces of the stamp went missing, try again");
+			return;
+		}
+		foreach (int word : words)
+			up.words.Insert(word);
+		m_MDT_UpNext.Set(uid, index + 1);
+		if (index + 1 < count)
 			return;
 		m_MDT_UpPieces.Remove(uid);
-		string json;
-		foreach (string piece : pieces)
-			json += piece;
-		MDT_Upload up;
-		string error;
-		if (!JsonFileLoader<MDT_Upload>.LoadData(json, up, error) || !up || m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		m_MDT_UpNext.Remove(uid);
+		Print(string.Format("[MapDrawingTool] stamp %1 from %2: %3 bytes received, sending to the web app", name, uid, up.bytes));
+		if (m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		{
+			MDT_UploadReply(uid, name, false, "", "", 0, "this server has no map web app set up");
 			return;
+		}
 		up.serverKey = m_MDT_Config.serverKey;
 		up.steamId = uid;
-		string body;
+		string body, error;
 		JsonFileLoader<MDT_Upload>.MakeData(up, body, error, false);
 		RestApi api = GetRestApi();
 		if (!api)
 			api = CreateRestApi();
 		if (!api)
+		{
+			MDT_UploadReply(uid, name, false, "", "", 0, "the server cannot reach the map web app");
 			return;
+		}
 		MDT_UploadCallback cb = new MDT_UploadCallback(uid, up.name);
 		m_MDT_UpWaiting.Insert(cb);
 		RestContext ctx = api.GetRestContext(m_MDT_Config.liveUrl);
 		ctx.SetHeader("application/json");
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + "/ingame/upload", body);
+	}
+
+	void MDT_UploadReply(string uid, string name, bool ok, string id, string preview, int parts, string why)
+	{
+		PlayerBase player;
+		PlayerIdentity identity;
+		if (!MDT_FindPlayer(uid, player, identity))
+			return;
+		ScriptRPC rpc = new ScriptRPC();
+		rpc.Write(name);
+		rpc.Write(ok);
+		rpc.Write(id);
+		rpc.Write(why);
+		rpc.Write(preview);
+		rpc.Write(parts);
+		rpc.Send(player, MDT_RPC_UPLOADED, true, identity);
 	}
 
 	void MDT_UploadDone(MDT_UploadCallback cb, string data)
@@ -633,19 +672,16 @@ modded class MissionServer
 		string why = "the map web app could not be reached";
 		if (result && result.error != "")
 			why = result.error;
-		string id;
+		string id, preview;
+		int parts;
 		if (ok)
+		{
 			id = result.id;
-		PlayerBase player;
-		PlayerIdentity identity;
-		if (!MDT_FindPlayer(cb.m_Uid, player, identity))
-			return;
-		ScriptRPC rpc = new ScriptRPC();
-		rpc.Write(cb.m_Name);
-		rpc.Write(ok);
-		rpc.Write(id);
-		rpc.Write(why);
-		rpc.Send(player, MDT_RPC_UPLOADED, true, identity);
+			preview = result.preview;
+			parts = result.parts;
+		}
+		Print(string.Format("[MapDrawingTool] stamp %1: web app ok %2 (%3)", cb.m_Name, ok, why));
+		MDT_UploadReply(cb.m_Uid, cb.m_Name, ok, id, preview, parts, why);
 	}
 
 	// ---------------------------------------------------------------- a player's own submissions

@@ -14,18 +14,20 @@ modded class PlayerBase
 		}
 		if (rpc_type == MDT_RPC_UPLOAD && GetGame().IsServer())
 		{
-			int uIndex, uCount;
-			string uText;
-			if (ctx.Read(uIndex) && ctx.Read(uCount) && ctx.Read(uText))
-				MDT_Events.UploadPiece.Invoke(this, sender, uIndex, uCount, uText);
+			int uIndex, uCount, uBytes;
+			string uName;
+			array<int> uWords = new array<int>;
+			if (ctx.Read(uIndex) && ctx.Read(uCount) && ctx.Read(uName) && ctx.Read(uBytes) && ctx.Read(uWords))
+				MDT_Events.UploadPiece.Invoke(this, sender, uIndex, uCount, uName, uBytes, uWords);
 			return;
 		}
 		if (rpc_type == MDT_RPC_UPLOADED && GetGame().IsClient())
 		{
-			string upName, upId, upError;
+			string upName, upId, upError, upPreview;
 			bool upOk;
-			if (ctx.Read(upName) && ctx.Read(upOk) && ctx.Read(upId) && ctx.Read(upError))
-				MDT_Draft.OnUploaded(upName, upOk, upId, upError);
+			int upParts;
+			if (ctx.Read(upName) && ctx.Read(upOk) && ctx.Read(upId) && ctx.Read(upError) && ctx.Read(upPreview) && ctx.Read(upParts))
+				MDT_Draft.OnUploaded(upName, upOk, upId, upError, upPreview, upParts);
 			return;
 		}
 		if (rpc_type == MDT_RPC_MINE_ASK && GetGame().IsServer())

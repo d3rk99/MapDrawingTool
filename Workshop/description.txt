@@ -12,7 +12,7 @@ Let your players draw on your server's map. Territories, guild bases, trade spot
 [h2]Features[/h2]
 [list]
 [*]Web map editor: brush, eraser, stamps (built in or your own PNG), painted text, live map markers with the in-game icons.
-[*][b]Draw in game:[/b] carry a pen, open the map, press D and draw with the mouse in the pen's colour. Send it with Enter.
+[*][b]Draw in game:[/b] carry a pen, open the map, press D and draw with the mouse in the pen's colour. Add markers, text and stamps, including your own PNG images (put them in %LOCALAPPDATA%\DayZ\MapDrawingTool\stamps). Send it with Enter.
 [*][b]Personal or for everyone:[/b] players choose whether a drawing is shared with the server or only on their own map. You choose whether personal drawings need your approval.
 [*][b]Lifespans:[/b] drawings can expire after a day, a week, a month... or stay. You set the limits.
 [*]Owner approval page for every map at once: approve, reject, revoke, delete.

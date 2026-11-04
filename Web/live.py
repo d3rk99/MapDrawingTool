@@ -184,6 +184,22 @@ def paper_path(paper_dir):
     return os.path.join(paper_dir, names[0]) if names else None
 
 
+def stamp_preview(png, paa, side=256):
+    """A player's stamp PNG as a small square PAA the game can show (it cannot show PNGs): the image
+    centred on a transparent square, so the in-game preview keeps its shape. Returns the part count."""
+    if not os.path.isfile(paa):
+        img = Image.open(png).convert("RGBA")
+        img.thumbnail((side, side), Image.LANCZOS)
+        square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        square.paste(img, ((side - img.width) // 2, (side - img.height) // 2))
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "stamp_ca.png")      # _ca: ImageToPAA keeps the alpha channel
+            square.save(src)
+            subprocess.run([paths.image_to_paa(), src, paa + ".tmp"], check=True, capture_output=True, timeout=60)
+        os.replace(paa + ".tmp", paa)
+    return -(-os.path.getsize(paa) // PART_BYTES)
+
+
 def json_part(paa, part):
     """One part of a PAA as {"d": [signed little-endian int32, ...]}, zero-padded to whole words."""
     data = open(paa, "rb").read()

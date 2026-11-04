@@ -5,9 +5,10 @@
 #        -Mod E:\DayZMods\Mods\@MapDrawingTool   runs the real mod instead of the feasibility test
 #        -Map <web app map id> writes <ProfileRoot>\Server\MapDrawingTool\config.json for the real mod
 #        A second server at once needs its own -ProfileRoot, -Port and -InstanceId.
+#        -Client -PlayerProfile: the game uses your normal profile (%LOCALAPPDATA%\DayZ, also its logs), as a player's would; stamps go in %LOCALAPPDATA%\DayZ\MapDrawingTool\stamps
 param([Parameter(Mandatory = $true)][string]$ProfileRoot, [switch]$Client, [int]$Port = 2402,
   [string]$Mod = 'E:\DayZMods\Mods\@MapDrawingToolTest', [int]$InstanceId = 42, [string]$Map = '',
-  [string]$Mission = 'mdttest.chernarusplus')
+  [string]$Mission = 'mdttest.chernarusplus', [switch]$PlayerProfile)
 $ErrorActionPreference = 'Stop'
 $mod = $Mod
 $serverRoot = 'E:\Steam\steamapps\common\DayZServer'
@@ -17,7 +18,8 @@ New-Item -ItemType Directory -Force -Path $ProfileRoot | Out-Null
 if ($Client) {
   if (Get-Process -Name DayZ_x64, DayZ_BE -ErrorAction SilentlyContinue) { throw 'Exit the running DayZ client first.' }
   $args = @('0', '1', '1', '-exe', 'DayZ_x64.exe', '-noPause', '-noSplash', '-window', "`"-mod=$mod`"",
-    "`"-profiles=$ProfileRoot\Client`"", '-name=MDTTest', '-connect=127.0.0.1', "-port=$Port")
+    '-name=MDTTest', '-connect=127.0.0.1', "-port=$Port")
+  if (!$PlayerProfile) { $args += "`"-profiles=$ProfileRoot\Client`"" }
   Start-Process -FilePath (Join-Path $clientRoot 'DayZ_BE.exe') -ArgumentList $args -WorkingDirectory $clientRoot
   Write-Output "Client starting, joining 127.0.0.1:$Port"
   return

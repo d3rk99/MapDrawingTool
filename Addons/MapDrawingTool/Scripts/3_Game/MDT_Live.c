@@ -54,6 +54,7 @@ class MDT_Live
 	static int s_ReadyCount;                     // bumps whenever an image becomes drawable
 	static ref map<string, string> s_ImagePaths = new map<string, string>;   // layer id -> cached PAA
 	static string s_PaperPath;                   // cached paper map texture, "" until there is one
+	static ref map<string, string> s_StampPaths = new map<string, string>;   // player's stamp file name -> cached PAA preview
 	static ref array<string> s_Others = new array<string>;   // other players' paper textures in use (kept by CleanCache)
 
 	protected static string s_Version;
@@ -144,6 +145,13 @@ class MDT_Live
 			keep.Insert(s_PaperPath);
 		foreach (string other : s_Others)
 			keep.Insert(other);
+		foreach (MDT_Download busy : s_Queue)
+		{
+			keep.Insert(busy.path);
+			keep.Insert(busy.temp);
+		}
+		foreach (string stampPath : s_StampPaths)
+			keep.Insert(stampPath);
 		string name;
 		FileAttr attr;
 		array<string> drop = new array<string>;
@@ -188,6 +196,26 @@ class MDT_Live
 		Queue(paper, path);
 		s_Queue[s_Queue.Count() - 1].other = true;
 		return path;
+	}
+
+	// The preview of the player's own stamp PNG, made by the web app (MDT_Draft.OnUploaded).
+	static void QueueStamp(string name, string preview, int parts)
+	{
+		if (preview == "" || parts <= 0 || s_Base == "" || !s_Manifest)
+			return;
+		string path = MDT_CACHE_DIR + "/" + preview + ".paa";
+		if (FileExist(path))
+		{
+			s_StampPaths.Set(name, path);
+			MDT_Draft.s_Version++;
+			return;
+		}
+		MDT_Layer layer = new MDT_Layer();
+		layer.id = preview;
+		layer.kind = "stamp";
+		layer.parts = parts;
+		layer.hash = name;                          // the file name, for s_StampPaths
+		Queue(layer, path);
 	}
 
 	protected static void Queue(MDT_Layer layer, string path)
@@ -256,7 +284,12 @@ class MDT_Live
 		if (CopyFile(job.temp, job.path))
 		{
 			// another player's texture: MDT_Watch sees the file appear
-			if (!job.other && job.layer.kind == "paper")
+			if (job.layer.kind == "stamp")
+			{
+				s_StampPaths.Set(job.layer.hash, job.path);
+				MDT_Draft.s_Version++;             // placed stamps redraw with the picture
+			}
+			else if (!job.other && job.layer.kind == "paper")
 				s_PaperPath = job.path;
 			else if (!job.other)
 				s_ImagePaths.Set(job.layer.id, job.path);

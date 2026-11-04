@@ -22,8 +22,9 @@ const int MDT_RPC_PAPER_ASK = 0x4D445408;   // client -> server, on another play
 const int MDT_RPC_PAPER = 0x4D445409;       // server -> client, on that player: their paper texture
 const int MDT_RPC_UPLOAD = 0x4D44540A;      // client -> server: a stamp PNG from the player's folder, in pieces
 const int MDT_RPC_UPLOADED = 0x4D44540B;    // server -> client: its id at the web app (or why not)
-const string MDT_STAMPS_DIR = "$profile:MapDrawingTool/stamps";   // players' own stamp PNGs (Documents\DayZ\...)
+const string MDT_STAMPS_DIR = "$profile:MapDrawingTool/stamps";   // players' own stamp PNGs (%LOCALAPPDATA%\DayZ\MapDrawingTool\stamps)
 const int MDT_UPLOAD_MAX_WORDS = 24576;     // 96 KB, the web app's limit
+const int MDT_UPLOAD_PIECE = 200;          // ints per upload RPC (800 bytes)
 const int MDT_RPC_CHUNK = 1000;             // characters per RPC; 4000 arrived "String CORRUPTED" (646 was fine)
 const string MDT_PROFILE_DIR = "$profile:MapDrawingTool";
 const string MDT_CONFIG_FILE = "$profile:MapDrawingTool\\config.json";
@@ -149,6 +150,7 @@ class MDT_Upload
 	string serverKey;
 	string steamId;
 	string name;
+	int bytes;              // the file's length (the last word may be padding)
 	ref array<int> words = new array<int>;
 }
 
@@ -157,6 +159,8 @@ class MDT_UploadResult
 	bool ok;
 	string error;
 	string id;
+	string preview;         // download id of a PAA the game can show ("" if none)
+	int parts;
 }
 
 // The web app's answer to api/<mapId>/ingame
@@ -279,8 +283,14 @@ class MDT_Draft
 
 	// The player's own stamp PNGs: file name -> id at the web app ("" while uploading).
 	static ref map<string, string> s_Uploads = new map<string, string>;
-	static ref array<string> s_UploadPieces = new array<string>;     // waiting to be sent, a few per frame
-	static int s_UploadCount;
+	// The upload in progress: the file as ints, sent MDT_UPLOAD_PIECE at a time, a few RPCs per frame
+	// (raw ints, not JSON: the server could not parse the joined JSON back, 2026-11-03).
+	static ref array<int> s_UploadWords = new array<int>;
+	static string s_UploadName;
+	static int s_UploadBytes;
+	static int s_UploadNext;            // next piece to send
+	static int s_UploadCount;           // pieces in all (0 = nothing in progress)
+	static int s_UploadDeadline;        // TickCount by which the web app's answer must be back
 
 	static void Add(int kind)
 	{
@@ -331,11 +341,17 @@ class MDT_Draft
 	}
 
 	// The web app has the player's stamp PNG (or refused it).
-	static void OnUploaded(string name, bool ok, string id, string error)
+	static void OnUploaded(string name, bool ok, string id, string error, string preview, int parts)
 	{
+		if (name == s_UploadName)
+		{
+			s_UploadCount = 0;
+			s_UploadDeadline = 0;
+		}
 		if (ok)
 		{
 			s_Uploads.Set(name, id);
+			MDT_Live.QueueStamp(name, preview, parts);
 			s_Status = "Stamp " + name + " ready";
 		}
 		else
@@ -348,50 +364,83 @@ class MDT_Draft
 	// Sends a few queued upload pieces per frame (a stamp is up to a few hundred).
 	static void Update()
 	{
-		if (s_UploadPieces.Count() == 0)
+		if (s_UploadDeadline != 0 && TickCount(s_UploadDeadline) > 0)
+		{
+			s_UploadDeadline = 0;
+			s_UploadCount = 0;
+			string late;
+			if (s_Uploads.Find(s_UploadName, late) && late == "")
+			{
+				s_Uploads.Remove(s_UploadName);
+				s_Status = "Stamp " + s_UploadName + ": no answer from the server, try again";
+			}
+		}
+		if (s_UploadCount == 0 || s_UploadNext >= s_UploadCount)
 			return;
 		Man player = GetGame().GetPlayer();
 		if (!player)
 			return;
-		for (int n = 0; n < 8 && s_UploadPieces.Count() > 0; n++)
+		for (int n = 0; n < 8 && s_UploadNext < s_UploadCount; n++)
 		{
-			int index = s_UploadCount - s_UploadPieces.Count();
+			array<int> chunk = new array<int>;
+			int from = s_UploadNext * MDT_UPLOAD_PIECE;
+			int to = Math.Min(from + MDT_UPLOAD_PIECE, s_UploadWords.Count());
+			for (int w = from; w < to; w++)
+				chunk.Insert(s_UploadWords[w]);
 			ScriptRPC rpc = new ScriptRPC();
-			rpc.Write(index);
+			rpc.Write(s_UploadNext);
 			rpc.Write(s_UploadCount);
-			rpc.Write(s_UploadPieces[0]);
+			rpc.Write(s_UploadName);
+			rpc.Write(s_UploadBytes);
+			rpc.Write(chunk);
 			rpc.Send(player, MDT_RPC_UPLOAD, true, null);
-			s_UploadPieces.Remove(0);
+			s_UploadNext++;
 		}
+		if (s_UploadNext >= s_UploadCount)
+			s_UploadDeadline = TickCount(0) + 20000;   // the web app answers through the server
 	}
 
-	// Reads a PNG from the player's stamps folder and queues it for upload. FileSerializer reads
-	// 4 bytes at a time, so up to 3 bytes at the end may be lost: the web app restores the PNG's
-	// fixed IEND chunk. Logs whether the file looked like a PNG (first 4 bytes 89 50 4E 47).
+	// Reads a PNG from the player's stamps folder and queues it for upload. ReadFile gives the raw
+	// bytes and how many there were (FileSerializer.Read does not stop at the end of a file: tested
+	// 2026-11-03, a 1.3 KB file read on to the 96 KB limit). Logs whether it looked like a PNG
+	// (first 4 bytes 89 50 4E 47).
 	static bool Upload(string name)
 	{
 		string have;
 		if (s_Uploads.Find(name, have))
 			return true;                            // sent already, or on its way
-		if (s_UploadPieces.Count() > 0)
+		if (s_UploadCount > 0)
 		{
 			s_Status = "Wait for the other stamp to finish uploading";
 			return false;
 		}
-		FileSerializer f = new FileSerializer();
-		if (!f.Open(MDT_STAMPS_DIR + "/" + name, FileMode.READ))
+		FileHandle fh = OpenFile(MDT_STAMPS_DIR + "/" + name, FileMode.READ);
+		if (!fh)
 		{
 			s_Status = "Cannot open " + name;
 			return false;
 		}
+		// Small pieces: one 96 KB local int array crashed the game (2026-11-03). buf holds 1024 ints but
+		// only 1024 bytes are asked for, so it cannot overflow whichever unit ReadFile counts in.
 		MDT_Upload up = new MDT_Upload();
 		up.name = name;
-		int w;
-		while (up.words.Count() <= MDT_UPLOAD_MAX_WORDS && f.Read(w))
-			up.words.Insert(w);
-		f.Close();
+		int got = 0;
+		int buf[1024];
+		while (up.words.Count() <= MDT_UPLOAD_MAX_WORDS)
+		{
+			int n = ReadFile(fh, buf, 1024);
+			if (n <= 0)
+				break;
+			got += n;
+			for (int w = 0; w < (n + 3) / 4; w++)
+				up.words.Insert(buf[w]);
+			if (n < 1024)
+				break;
+		}
+		CloseFile(fh);
+		up.bytes = got;
 		bool png = up.words.Count() > 0 && up.words[0] == 0x474E5089;
-		Print(string.Format("[MapDrawingTool] stamp %1: read %2 words, PNG signature %3", name, up.words.Count(), png));
+		Print(string.Format("[MapDrawingTool] stamp %1: read %2 bytes, PNG signature %3", name, got, png));
 		if (!png)
 		{
 			s_Status = name + " is not a PNG (or could not be read)";
@@ -402,12 +451,12 @@ class MDT_Draft
 			s_Status = name + " is too big (stamps can be up to 96 KB)";
 			return false;
 		}
-		string json, error;
-		JsonFileLoader<MDT_Upload>.MakeData(up, json, error, false);
-		int len = json.Length();
-		s_UploadCount = Math.Max(1, (len + MDT_RPC_CHUNK - 1) / MDT_RPC_CHUNK);
-		for (int i = 0; i < s_UploadCount; i++)
-			s_UploadPieces.Insert(json.Substring(i * MDT_RPC_CHUNK, Math.Min(MDT_RPC_CHUNK, len - i * MDT_RPC_CHUNK)));
+		s_UploadWords = up.words;
+		s_UploadName = name;
+		s_UploadBytes = got;
+		s_UploadNext = 0;
+		s_UploadCount = (up.words.Count() + MDT_UPLOAD_PIECE - 1) / MDT_UPLOAD_PIECE;
+		s_UploadDeadline = 0;
 		s_Uploads.Set(name, "");
 		s_Status = "Uploading stamp " + name + "...";
 		return true;

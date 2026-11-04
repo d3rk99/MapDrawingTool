@@ -559,6 +559,13 @@ def api_live_paper(map_id, part):
 @app.get("/api/<map_id>/live/<sub_id>/<int:part>")
 def api_live_part(map_id, sub_id, part):
     map_id, world = map_or_404(map_id)
+    m = re.fullmatch(r"stamp-(\d{17})-([0-9a-f]{16})", sub_id)
+    if m:                                     # a player's stamp PNG as a PAA preview (ingame/upload)
+        paa = os.path.join(upload_dir(m.group(1)), m.group(2) + ".paa")
+        text = live.json_part(paa, part) if os.path.isfile(paa) else None
+        if text is None:
+            abort(404)
+        return app.response_class(text, mimetype="application/json")
     path = sub_dir(map_id, sub_id)
     sub = read_sub(path)
     if not is_live(sub) or not os.path.isfile(os.path.join(path, "live.paa")):
@@ -774,6 +781,8 @@ def api_ingame_upload(map_id):
         data = b"".join(int(w).to_bytes(4, "little", signed=True) for w in words)
     except (TypeError, ValueError, OverflowError):
         return jsonify(ok=False, error="The image could not be read"), 200
+    if 0 < int(body.get("bytes") or 0) <= len(data):
+        data = data[:int(body["bytes"])]                      # the last word's padding
     iend = b"\x00\x00\x00\x00IEND\xaeB`\x82"
     cut = data.rfind(b"IEND")
     if cut >= 4:
@@ -792,9 +801,16 @@ def api_ingame_upload(map_id):
     img.save(buf, "PNG")                                     # re-encoded: never keep what was sent as is
     uid = hashlib.sha1(buf.getvalue()).hexdigest()[:16]
     os.makedirs(upload_dir(sid), exist_ok=True)
-    with open(os.path.join(upload_dir(sid), uid + ".png"), "wb") as f:
+    png = os.path.join(upload_dir(sid), uid + ".png")
+    with open(png, "wb") as f:
         f.write(buf.getvalue())
-    return jsonify(ok=True, id=uid, name=clean_text(body.get("name"), 64), w=img.width, h=img.height), 200
+    try:                                      # the game shows this while the player places the stamp
+        parts = live.stamp_preview(png, os.path.join(upload_dir(sid), uid + ".paa"))
+    except Exception as e:
+        print(f"stamp preview for {sid}/{uid} failed: {e}", flush=True)
+        parts = 0
+    return jsonify(ok=True, id=uid, name=clean_text(body.get("name"), 64), w=img.width, h=img.height,
+                   preview=f"stamp-{sid}-{uid}" if parts else "", parts=parts), 200
 
 
 @app.get("/api/admin/build")
