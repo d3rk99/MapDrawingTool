@@ -143,6 +143,13 @@ const Settings = (() => {
     const hookList = el("div", {}, ...data.webhooks.map(webhookRow));
     const serverKey = el("input", { readonly: "", value: data.serverKey, onfocus: function () { this.select(); } });
     const newKey = el("input", { type: "checkbox" });
+    const configBox = () => {
+      const box = el("textarea", { readonly: "", rows: "7", onfocus: function () { this.select(); } });
+      box.value = JSON.stringify({
+        liveUrl: data.publicUrl ? data.publicUrl.replace(/\/?$/, "/") : "http://YOUR-PUBLIC-ADDRESS:8640/",
+        lanUrl: data.lanUrl || "", mapId: "", serverKey: data.serverKey, pollSeconds: 60 }, null, 1);
+      return box;
+    };
     const status = el("p", { class: "status" });
     const save = el("button", { class: "primary", text: "Save settings", onclick: async () => {
       const clear = [];
@@ -183,8 +190,10 @@ const Settings = (() => {
         el("p", { class: "hint", text: "The default for every map. Signed-in Discord players get their roles checked when they sign in." }), defaults,
         el("h4", { text: "Per map" }), ...perMap),
       el("section", { class: "panel" }, el("h3", { text: "Game servers" }),
-        el("p", { class: "hint", text: "Drawings made in game reach the web app through your DayZ server. Put this key in each server's profiles\\MapDrawingTool\\config.json as \"serverKey\", next to liveUrl." }),
-        field("Server key", serverKey),
+        el("p", { class: "hint", text: "Put these lines in each DayZ server's profiles\\MapDrawingTool\\config.json and restart it. liveUrl is the public address players on the internet use. lanUrl is this PC on your own network: the DayZ server uses it, and so do players who joined the server over a private address (needed when your router can't reach its own public IP from inside). Leave lanUrl empty if the web app is not on the same network as your servers." }),
+        configBox(),
+        data.host === "127.0.0.1" ? el("p", { class: "status error", text: "This web app only listens on this PC (\"host\": \"127.0.0.1\" in Web\\config.json). Set \"host\": \"0.0.0.0\" and restart it, so other machines can reach it." }) : null,
+        field("Server key", serverKey, "Drawings made in game reach the web app through your DayZ server with this key."),
         el("label", { class: "chip" }, newKey, el("span", { text: "Make a new key when saving (servers with the old key stop sending in-game drawings)" }))),
       el("section", { class: "panel" }, el("h3", { text: "Notifications" }),
         el("p", { class: "hint", text: "Discord: channel settings > Integrations > Webhooks > New Webhook > Copy Webhook URL." }),

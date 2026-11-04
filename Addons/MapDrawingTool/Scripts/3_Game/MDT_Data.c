@@ -33,7 +33,10 @@ const string MDT_CACHE_DIR = "$profile:MapDrawingTool/cache";
 
 class MDT_Config
 {
-	string liveUrl = "";        // web app base URL, e.g. "http://map.example.com:8640/" (players download from it too)
+	string liveUrl = "";        // web app's public address, e.g. "http://map.example.com:8640/" (players download from it)
+	string lanUrl = "";         // optional: its address on the server's own network, e.g. "http://192.168.1.50:8640/".
+	                            // The DayZ server uses it, and so do players who joined over a private address
+	                            // (routers without NAT loopback cannot reach their own public IP from inside).
 	string mapId = "";          // the web app map this server shows; "" = the world name (one map per world)
 	string serverKey = "";      // from the web app's Settings > Game servers; needed for in-game drawings
 	int pollSeconds = 60;

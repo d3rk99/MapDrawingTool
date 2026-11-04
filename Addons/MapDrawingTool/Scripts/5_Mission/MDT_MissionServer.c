@@ -170,6 +170,7 @@ modded class MissionServer
 	static const int MDT_SUBMIT_MAX_POINTS = 3000;
 
 	protected ref MDT_Config m_MDT_Config;
+	protected string m_MDT_Url;            // what this server talks to: lanUrl if set, else liveUrl
 	protected ref MDT_ManifestCallback m_MDT_Callback;
 	protected ref MDT_Manifest m_MDT_Global;               // everyone's work, as the web app sent it
 	// Personal work only of players who are online, fetched when its version changes (live/players):
@@ -202,15 +203,19 @@ modded class MissionServer
 			Print("[MapDrawingTool] config.json not loaded: " + error);
 			m_MDT_Config = new MDT_Config();
 		}
-		if (m_MDT_Config.liveUrl != "" && m_MDT_Config.liveUrl.Substring(m_MDT_Config.liveUrl.Length() - 1, 1) != "/")
-			m_MDT_Config.liveUrl += "/";
+		m_MDT_Config.liveUrl = MDT_Slash(m_MDT_Config.liveUrl);
+		m_MDT_Config.lanUrl = MDT_Slash(m_MDT_Config.lanUrl);
+		JsonFileLoader<MDT_Config>.SaveFile(MDT_CONFIG_FILE, m_MDT_Config, error);   // shows fields added since
+		m_MDT_Url = m_MDT_Config.lanUrl;
+		if (m_MDT_Url == "")
+			m_MDT_Url = m_MDT_Config.liveUrl;
 		if (m_MDT_Config.mapId == "")
 		{
 			m_MDT_Config.mapId = GetGame().GetWorldName();
 			m_MDT_Config.mapId.ToLower();
 		}
 		int seconds = Math.Max(15, m_MDT_Config.pollSeconds);
-		Print("[MapDrawingTool] live url '" + m_MDT_Config.liveUrl + "', map '" + m_MDT_Config.mapId + "', every " + seconds + " s, in-game drawing " + (m_MDT_Config.serverKey != ""));
+		Print("[MapDrawingTool] live url '" + m_MDT_Config.liveUrl + "', lan url '" + m_MDT_Config.lanUrl + "', map '" + m_MDT_Config.mapId + "', every " + seconds + " s, in-game drawing " + (m_MDT_Config.serverKey != ""));
 		MDT_Poll();
 		GetGame().GetCallQueue(CALL_CATEGORY_SYSTEM).CallLater(MDT_Poll, seconds * 1000, true);
 		MDT_Events.SubmitPiece.Insert(MDT_OnSubmitPiece);
@@ -229,9 +234,17 @@ modded class MissionServer
 		GetGame().GetCallQueue(CALL_CATEGORY_SYSTEM).CallLater(MDT_PollPlayers, 3000, false);   // their personal work
 	}
 
+	protected static string MDT_Slash(string url)
+	{
+		url.TrimInPlace();
+		if (url != "" && url.Substring(url.Length() - 1, 1) != "/")
+			url += "/";
+		return url;
+	}
+
 	protected void MDT_Poll()
 	{
-		if (m_MDT_Config.liveUrl == "")
+		if (m_MDT_Url == "")
 		{
 			MDT_ReadMarkersFile();
 			return;
@@ -243,14 +256,14 @@ modded class MissionServer
 			return;
 		if (!m_MDT_Callback)
 			m_MDT_Callback = new MDT_ManifestCallback();
-		api.GetRestContext(m_MDT_Config.liveUrl).GET(m_MDT_Callback, "api/" + m_MDT_Config.mapId + "/live");
+		api.GetRestContext(m_MDT_Url).GET(m_MDT_Callback, "api/" + m_MDT_Config.mapId + "/live");
 		MDT_PollPlayers();
 	}
 
 	// Asks which online players have personal work and its version; fetches what changed.
 	protected void MDT_PollPlayers()
 	{
-		if (m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		if (m_MDT_Url == "" || m_MDT_Config.serverKey == "")
 			return;
 		MDT_PlayersAsk ask = new MDT_PlayersAsk();
 		ask.serverKey = m_MDT_Config.serverKey;
@@ -280,7 +293,7 @@ modded class MissionServer
 			JsonFileLoader<MDT_PlayerAsk>.MakeData(MDT_PlayerAsk.Cast(body), json, error, false);
 		MDT_PersonalCallback cb = new MDT_PersonalCallback(uid);
 		m_MDT_PersonalWaiting.Insert(cb);
-		RestContext ctx = api.GetRestContext(m_MDT_Config.liveUrl);
+		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + path, json);
 	}
@@ -453,6 +466,7 @@ modded class MissionServer
 			rpc.Write(count);
 			rpc.Write(json.Substring(i * MDT_RPC_CHUNK, Math.Min(MDT_RPC_CHUNK, len - i * MDT_RPC_CHUNK)));
 			rpc.Write(m_MDT_Config.liveUrl);
+			rpc.Write(m_MDT_Config.lanUrl);                 // the player's game picks one (MDT_Live.PickBase)
 			rpc.Send(player, MDT_RPC_MANIFEST, true, identity);
 		}
 	}
@@ -480,7 +494,7 @@ modded class MissionServer
 		foreach (string piece : pieces)
 			json += piece;
 
-		if (m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		if (m_MDT_Url == "" || m_MDT_Config.serverKey == "")
 		{
 			MDT_Reply(player, sender, false, "This server is not set up for in-game drawing (serverKey)");
 			return;
@@ -544,7 +558,7 @@ modded class MissionServer
 		}
 		MDT_SubmitCallback cb = new MDT_SubmitCallback(uid);
 		m_MDT_Waiting.Insert(cb);
-		RestContext ctx = api.GetRestContext(m_MDT_Config.liveUrl);
+		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + "/ingame", body);
 		Print(string.Format("[MapDrawingTool] in-game drawing from %1: %2 items, %3 points, %4", sender.GetName(), items, points, submit.scope));
@@ -623,7 +637,7 @@ modded class MissionServer
 		m_MDT_UpPieces.Remove(uid);
 		m_MDT_UpNext.Remove(uid);
 		Print(string.Format("[MapDrawingTool] stamp %1 from %2: %3 bytes received, sending to the web app", name, uid, up.bytes));
-		if (m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		if (m_MDT_Url == "" || m_MDT_Config.serverKey == "")
 		{
 			MDT_UploadReply(uid, name, false, "", "", 0, "this server has no map web app set up");
 			return;
@@ -642,7 +656,7 @@ modded class MissionServer
 		}
 		MDT_UploadCallback cb = new MDT_UploadCallback(uid, up.name);
 		m_MDT_UpWaiting.Insert(cb);
-		RestContext ctx = api.GetRestContext(m_MDT_Config.liveUrl);
+		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + "/ingame/upload", body);
 	}
@@ -700,7 +714,7 @@ modded class MissionServer
 
 	protected void MDT_AskWebApp(string uid, string id, bool withdraw)
 	{
-		if (m_MDT_Config.liveUrl == "" || m_MDT_Config.serverKey == "")
+		if (m_MDT_Url == "" || m_MDT_Config.serverKey == "")
 		{
 			MDT_ReplyTo(uid, false, "This server is not set up for in-game drawing (serverKey)");
 			return;
@@ -718,7 +732,7 @@ modded class MissionServer
 		JsonFileLoader<MDT_PlayerAsk>.MakeData(ask, body, error, false);
 		MDT_MineCallback cb = new MDT_MineCallback(uid, withdraw);
 		m_MDT_MineWaiting.Insert(cb);
-		RestContext ctx = api.GetRestContext(m_MDT_Config.liveUrl);
+		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
 		string path = "/ingame/mine";
 		if (withdraw)

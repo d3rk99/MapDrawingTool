@@ -67,12 +67,28 @@ def get_settings():
                "discordRedirect": (S["public_url"]() or "<publicUrl>") + "/login/discord/return"},
         submitters=_rules_out({**access_defaults(), **(cfg.get("submitters") or {})}),
         serverKey=cfg.get("serverKey", ""),
+        lanUrl=_lan_url(cfg), host=cfg.get("host", "127.0.0.1"),
         maps=[{"id": m["id"], "name": m["name"], "world": m["world"],
                "override": _rules_out((cfg.get("mapSubmitters") or {}).get(m["id"]) or {}) or None}
               for m in S["maps"].values()],
         webhooks=[{"id": h.get("id", ""), "urlHint": _hint(h.get("url")), "format": h.get("format", "json"),
                    "events": h.get("events") or ["submitted"], "maps": h.get("maps") or [],
                    "secretSet": bool(h.get("secret"))} for h in cfg.get("webhooks") or []])
+
+
+def _lan_url(cfg):
+    """This PC's address on its own network, for the game servers' "lanUrl" (players on the same
+    network as the servers download from it; a router without NAT loopback can't reach its own
+    public IP from inside). The route to a public address tells which network card is used; no
+    packet is sent."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+    except OSError:
+        return ""
+    return f"http://{ip}:{int(cfg.get('port', 8640))}/"
 
 
 class Bad(ValueError):

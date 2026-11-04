@@ -73,13 +73,13 @@ modded class PlayerBase
 		if (rpc_type != MDT_RPC_MANIFEST || !GetGame().IsClient())
 			return;
 
-		string version, text, base;
+		string version, text, base, lan;
 		int index, count;
-		if (!ctx.Read(version) || !ctx.Read(index) || !ctx.Read(count) || !ctx.Read(text) || !ctx.Read(base))
+		if (!ctx.Read(version) || !ctx.Read(index) || !ctx.Read(count) || !ctx.Read(text) || !ctx.Read(base) || !ctx.Read(lan))
 			return;
 		if (count < 1 || count > 500 || index < 0 || index >= count)
 			return;
-		MDT_Live.OnChunk(version, index, count, text, base);
+		MDT_Live.OnChunk(version, index, count, text, MDT_Live.PickBase(base, lan));
 	}
 
 	// With use3DMap the unfolded paper folds on a click, Esc, inventory or raised hands. While the

@@ -5,10 +5,13 @@
 #        -Mod E:\DayZMods\Mods\@MapDrawingTool   runs the real mod instead of the feasibility test
 #        -Map <web app map id> writes <ProfileRoot>\Server\MapDrawingTool\config.json for the real mod
 #        A second server at once needs its own -ProfileRoot, -Port and -InstanceId.
+#        -LiveUrl / -LanUrl: the server config's public and LAN web app addresses (LAN test: an
+#        unreachable -LiveUrl and -LanUrl http://127.0.0.1:8640/; a player joining 127.0.0.1 must use the LAN one).
 #        -Client -PlayerProfile: the game uses your normal profile (%LOCALAPPDATA%\DayZ, also its logs), as a player's would; stamps go in %LOCALAPPDATA%\DayZ\MapDrawingTool\stamps
 param([Parameter(Mandatory = $true)][string]$ProfileRoot, [switch]$Client, [int]$Port = 2402,
   [string]$Mod = 'E:\DayZMods\Mods\@MapDrawingToolTest', [int]$InstanceId = 42, [string]$Map = '',
-  [string]$Mission = 'mdttest.chernarusplus', [switch]$PlayerProfile)
+  [string]$Mission = 'mdttest.chernarusplus', [switch]$PlayerProfile,
+  [string]$LiveUrl = 'http://127.0.0.1:8640/', [string]$LanUrl = '')
 $ErrorActionPreference = 'Stop'
 $mod = $Mod
 $serverRoot = 'E:\Steam\steamapps\common\DayZServer'
@@ -35,7 +38,7 @@ if ($Map) {
   New-Item -ItemType Directory -Force -Path $mdt | Out-Null
   # the web app's serverKey (Settings > Game servers) so in-game drawings reach it
   $key = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Web\config.json') -Raw | ConvertFrom-Json).serverKey
-  "{`"liveUrl`":`"http://127.0.0.1:8640/`",`"mapId`":`"$Map`",`"serverKey`":`"$key`",`"pollSeconds`":30}" | Set-Content -LiteralPath (Join-Path $mdt 'config.json') -Encoding ASCII
+  "{`"liveUrl`":`"$LiveUrl`",`"lanUrl`":`"$LanUrl`",`"mapId`":`"$Map`",`"serverKey`":`"$key`",`"pollSeconds`":30}" | Set-Content -LiteralPath (Join-Path $mdt 'config.json') -Encoding ASCII
 }
 # mdttest.<world> = dayzOffline.<world> with cfggameplay.json "use3DMap": true and a paper map at spawn
 # (the unfolded map stays in hand; M toggles the full-screen map). The file only loads with enableCfgGameplayFile.

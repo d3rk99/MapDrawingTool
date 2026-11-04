@@ -45,10 +45,17 @@ Then on **Settings > Web address** enter that public address and save.
 Edit `profiles\MapDrawingTool\config.json` on the DayZ server and restart it:
 
 ```json
-{ "liveUrl": "https://map.yourdomain.com/", "mapId": "chernarusplus", "serverKey": "...", "pollSeconds": 60 }
+{ "liveUrl": "https://map.yourdomain.com/", "lanUrl": "http://192.168.1.50:8640/", "mapId": "", "serverKey": "...", "pollSeconds": 60 }
 ```
 
+Settings > Game servers shows these lines ready to copy, with your server key and this PC's LAN address.
+
 - `liveUrl`: the public address from step 3.
+- `lanUrl` (optional): the web app's address on your own network. The DayZ server uses it, and so
+  does every player who joined the server over a private address (192.168.x, 10.x, 127.0.0.1...).
+  Needed when you or the servers sit on the same network as the web app and your router can't reach
+  its own public IP from inside (no NAT loopback). Players from the internet keep using `liveUrl`.
+  Leave it empty when the web app is elsewhere.
 - `serverKey`: copy it from the web app's Settings > Game servers. Without it, players can't send
   drawings made in game (everything else still works).
 - `mapId`: which map's drawings this server shows. Empty = the server's own world

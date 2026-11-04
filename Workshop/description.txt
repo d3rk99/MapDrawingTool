@@ -62,9 +62,11 @@ Full written guide: SERVER_SETUP.md inside the download.
 
 [h3]3. Point your DayZ server at it[/h3]
 Edit [b]profiles\MapDrawingTool\config.json[/b] and restart the server:
-[code]{ "liveUrl": "https://map.yourdomain.com/", "mapId": "", "serverKey": "from Settings > Game servers", "pollSeconds": 60 }[/code]
+[code]{ "liveUrl": "https://map.yourdomain.com/", "lanUrl": "http://192.168.1.50:8640/", "mapId": "", "serverKey": "from Settings > Game servers", "pollSeconds": 60 }[/code]
+Settings > Game servers on the web app shows these lines ready to copy.
 [list]
-[*][b]liveUrl[/b]: your public web app address. Players' games download the map from it, so not 127.0.0.1.
+[*][b]liveUrl[/b]: your public web app address. Players from the internet download the map from it, so not 127.0.0.1.
+[*][b]lanUrl[/b] (optional): the web app's address on your own network. Players who joined your server over a private address (you, at home next to the server) and the server itself use it, so it works even when your router can't reach its own public IP. Leave it empty if the web app is elsewhere.
 [*][b]mapId[/b]: empty = the server's own map. Several servers on the same terrain with different drawings: see SERVER_SETUP.md.
 [*][b]serverKey[/b]: needed for drawing in game (and players' own stamps).
 [/list]

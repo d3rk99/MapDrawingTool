@@ -61,6 +61,7 @@ class MDT_Live
 
 	static ref MDT_Manifest s_Manifest;
 	static string s_Base;
+	protected static string s_Picked;           // last address PickBase chose (logged when it changes)
 	static int s_ReadyCount;                     // bumps whenever an image becomes drawable
 	static ref map<string, string> s_ImagePaths = new map<string, string>;   // layer id -> cached PAA
 	static string s_PaperPath;                   // cached paper map texture, "" until there is one
@@ -75,6 +76,47 @@ class MDT_Live
 	protected static bool s_CleanPending;          // tidy the cache once this manifest's downloads are done
 	protected static int s_LastTick;
 	protected static float s_TicksPerMs;         // TickCount is CPU ticks; measured against frame time
+
+	// Private / local addresses (RFC 1918 + loopback), as DriveLink's DL_Net.IsLocalAddress.
+	static bool IsLocalAddress(string a)
+	{
+		if (a == "" || a == "localhost" || a.IndexOf("127.") == 0 || a.IndexOf("10.") == 0 || a.IndexOf("192.168.") == 0)
+			return true;
+		if (a.IndexOf("172.") == 0)
+		{
+			TStringArray parts = new TStringArray;
+			a.Split(".", parts);
+			if (parts.Count() >= 2)
+			{
+				int second = parts[1].ToInt();
+				return second >= 16 && second <= 31;
+			}
+		}
+		return false;
+	}
+
+	// Which web app address this player downloads from: the server's lanUrl when the player joined
+	// the server over a private address (same network, where the public IP may not loop back),
+	// else the public liveUrl. GetHostAddress is the address the player's game joined with.
+	static string PickBase(string live, string lan)
+	{
+		if (lan == "")
+			return live;
+		if (live == "")
+			return lan;
+		string joined;
+		int port;
+		GetGame().GetHostAddress(joined, port);
+		string pick = live;
+		if (IsLocalAddress(joined))
+			pick = lan;
+		if (pick != s_Picked)
+		{
+			s_Picked = pick;
+			Print("[MapDrawingTool] joined via " + joined + ": map downloads from " + pick);
+		}
+		return pick;
+	}
 
 	// One RPC piece of the manifest. All pieces of one version arrive in order.
 	static void OnChunk(string version, int index, int count, string text, string base)
