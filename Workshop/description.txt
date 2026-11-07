@@ -70,6 +70,7 @@ Settings > Game servers on the web app shows these lines ready to copy.
 [*][b]lanUrl[/b] (optional): the web app's address on your own network. Players who joined your server over a private address (you, at home next to the server) and the server itself use it, so it works even when your router can't reach its own public IP. Leave it empty if the web app is elsewhere.
 [*][b]mapId[/b]: empty = the server's own map. Several servers on the same terrain with different drawings: see SERVER_SETUP.md.
 [*][b]serverKey[/b]: needed for drawing in game (and players' own stamps).
+[*][b]paperTexture[/b] (added on first start, default true): false keeps the vanilla paper map in hand, with no texture download. Drawings still show on M.
 [/list]
 
 [h3]4. Give players the link[/h3]
@@ -94,7 +95,8 @@ Close the web app, unzip the new download over the same folder (your settings an
 [hr][/hr]
 [h2]Good to know[/h2]
 [list]
-[*]Players download your map once per change (about 2.5 MB on Chernarus, 10 MB on the larger maps) in the background without FPS loss. Old versions are deleted automatically.
+[*]Players download your map once per change (about 2.5 MB on Chernarus, 10 MB on the larger maps) in the background without FPS loss, the first time they hold a paper map. Old versions are deleted automatically.
+[*]Players can turn the paper texture off for themselves: [b]%LOCALAPPDATA%\DayZ\MapDrawingTool\client.json[/b], "paper": 0. If a game ever closes during that download, it turns itself off for that player ("paper": 1 turns it back on). Download trouble? Ask for [b]progress.log[/b] in the same folder.
 [*]The wooden map boards in towns keep the vanilla map.
 [*]Built and tested on DayZ 1.30.
 [/list]

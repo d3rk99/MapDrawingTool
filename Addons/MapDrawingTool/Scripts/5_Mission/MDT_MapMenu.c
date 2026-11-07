@@ -1213,6 +1213,12 @@ modded class MissionGameplay
 	protected bool m_MDT_PaperOpen;
 	protected float m_MDT_PaperAgain;
 
+	override void OnMissionFinish()
+	{
+		MDT_Live.OnQuit();                       // a normal exit, not a crash (MDT_ClientConfig)
+		super.OnMissionFinish();
+	}
+
 	override void OnUpdate(float timeslice)
 	{
 		super.OnUpdate(timeslice);
@@ -1263,6 +1269,7 @@ modded class MissionGameplay
 			m_MDT_Paper = null;
 			return;
 		}
+		MDT_Live.WantPaper();                    // the first time: start its download
 		string texture = MDT_Live.s_PaperPath;
 		if (texture == "")
 			texture = paper.m_TextureOpened;
@@ -1277,6 +1284,8 @@ modded class MissionGameplay
 			return;
 		if (open && !m_MDT_PaperOpen)
 			m_MDT_PaperAgain = 1;
+		if (texture != m_MDT_PaperTexture)
+			MDT_Trace.Line("paper in hand shows " + texture);
 		m_MDT_Paper = paper;
 		m_MDT_PaperTexture = texture;
 		m_MDT_PaperOpen = open;

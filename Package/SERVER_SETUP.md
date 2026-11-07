@@ -60,6 +60,17 @@ Settings > Game servers shows these lines ready to copy, with your server key an
   drawings made in game (everything else still works).
 - `mapId`: which map's drawings this server shows. Empty = the server's own world
   (`chernarusplus`, `enoch`, `sakhal`, `nasdara`). Two servers with the same `mapId` share drawings.
+- `paperTexture` (added on first start, default `true`): `false` keeps the vanilla paper map in
+  players' hands, so they never download the 2.5-10 MB map texture. Drawings still show on the
+  full-screen map (M).
+
+Players download the paper texture only once they first hold a paper map. A player can turn it off
+for themselves in `%LOCALAPPDATA%\DayZ\MapDrawingTool\client.json` (`"paper": 0`). The game does
+that by itself if it ever closes during the paper download (a crash, or the game killed): the next
+start finds the download's marker, turns the paper texture off for that player and says so in the
+log. `"paper": 1` turns it back on. Each game also writes
+`%LOCALAPPDATA%\DayZ\MapDrawingTool\progress.log`: every download request and answer, written
+straight to disk, so it survives a crash. Ask a player for it when their downloads fail.
 
 **Several servers on the same terrain with different drawings:** add maps to `Web\config.json`,
 restart MapDrawingTool.exe, and give each server its map's id:

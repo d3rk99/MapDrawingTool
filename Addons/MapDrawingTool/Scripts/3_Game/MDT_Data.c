@@ -40,6 +40,7 @@ class MDT_Config
 	string mapId = "";          // the web app map this server shows; "" = the world name (one map per world)
 	string serverKey = "";      // from the web app's Settings > Game servers; needed for in-game drawings
 	int pollSeconds = 60;
+	bool paperTexture = true;  // false: players keep the vanilla paper map (no 2.5-10 MB download); drawings still show on M
 }
 
 class MDT_Marker

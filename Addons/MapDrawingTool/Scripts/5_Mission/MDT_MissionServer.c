@@ -6,6 +6,8 @@ class MDT_ManifestCallback : RestCallback
 {
 	override void OnSuccess(string data, int dataSize)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
 			mission.MDT_OnManifest(data);
@@ -13,11 +15,15 @@ class MDT_ManifestCallback : RestCallback
 
 	override void OnError(int errorCode)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		Print("[MapDrawingTool] live manifest request failed: error " + errorCode);
 	}
 
 	override void OnTimeout()
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		Print("[MapDrawingTool] live manifest request timed out");
 	}
 }
@@ -34,6 +40,8 @@ class MDT_SubmitCallback : RestCallback
 
 	override void OnSuccess(string data, int dataSize)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MDT_SubmitResult result;
 		string error;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
@@ -57,6 +65,8 @@ class MDT_SubmitCallback : RestCallback
 
 	override void OnError(int errorCode)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
 			mission.MDT_SubmitDone(this, false, "The map web app could not be reached (error " + errorCode + ")");
@@ -64,6 +74,8 @@ class MDT_SubmitCallback : RestCallback
 
 	override void OnTimeout()
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
 			mission.MDT_SubmitDone(this, false, "The map web app did not answer");
@@ -84,12 +96,21 @@ class MDT_MineCallback : RestCallback
 
 	override void OnSuccess(string data, int dataSize)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
 			mission.MDT_MineDone(this, data);
 	}
 
 	override void OnError(int errorCode)
+	{
+		if (!MDT_Rest.Answer(this))
+			return;
+		Failed();
+	}
+
+	void Failed()
 	{
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
@@ -98,7 +119,9 @@ class MDT_MineCallback : RestCallback
 
 	override void OnTimeout()
 	{
-		OnError(0);
+		if (!MDT_Rest.Answer(this))
+			return;
+		Failed();
 	}
 }
 
@@ -114,12 +137,21 @@ class MDT_PersonalCallback : RestCallback
 
 	override void OnSuccess(string data, int dataSize)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
 			mission.MDT_PersonalDone(this, data);
 	}
 
 	override void OnError(int errorCode)
+	{
+		if (!MDT_Rest.Answer(this))
+			return;
+		Failed();
+	}
+
+	void Failed()
 	{
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
@@ -128,7 +160,9 @@ class MDT_PersonalCallback : RestCallback
 
 	override void OnTimeout()
 	{
-		OnError(0);
+		if (!MDT_Rest.Answer(this))
+			return;
+		Failed();
 	}
 }
 
@@ -146,12 +180,21 @@ class MDT_UploadCallback : RestCallback
 
 	override void OnSuccess(string data, int dataSize)
 	{
+		if (!MDT_Rest.Answer(this))
+			return;
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
 			mission.MDT_UploadDone(this, data);
 	}
 
 	override void OnError(int errorCode)
+	{
+		if (!MDT_Rest.Answer(this))
+			return;
+		Failed();
+	}
+
+	void Failed()
 	{
 		MissionServer mission = MissionServer.Cast(GetGame().GetMission());
 		if (mission)
@@ -160,7 +203,9 @@ class MDT_UploadCallback : RestCallback
 
 	override void OnTimeout()
 	{
-		OnError(0);
+		if (!MDT_Rest.Answer(this))
+			return;
+		Failed();
 	}
 }
 
@@ -171,7 +216,6 @@ modded class MissionServer
 
 	protected ref MDT_Config m_MDT_Config;
 	protected string m_MDT_Url;            // what this server talks to: lanUrl if set, else liveUrl
-	protected ref MDT_ManifestCallback m_MDT_Callback;
 	protected ref MDT_Manifest m_MDT_Global;               // everyone's work, as the web app sent it
 	// Personal work only of players who are online, fetched when its version changes (live/players):
 	// a poll stays small however many players ever drew something.
@@ -203,6 +247,17 @@ modded class MissionServer
 			Print("[MapDrawingTool] config.json not loaded: " + error);
 			m_MDT_Config = new MDT_Config();
 		}
+		// a field missing from an older config.json loads as false, not as its default
+		FileHandle cfgFile = OpenFile(MDT_CONFIG_FILE, FileMode.READ);
+		if (cfgFile)
+		{
+			string cfgLine, cfgText;
+			while (FGets(cfgFile, cfgLine) >= 0)
+				cfgText += cfgLine;
+			CloseFile(cfgFile);
+			if (!cfgText.Contains("paperTexture"))
+				m_MDT_Config.paperTexture = true;
+		}
 		m_MDT_Config.liveUrl = MDT_Slash(m_MDT_Config.liveUrl);
 		m_MDT_Config.lanUrl = MDT_Slash(m_MDT_Config.lanUrl);
 		JsonFileLoader<MDT_Config>.SaveFile(MDT_CONFIG_FILE, m_MDT_Config, error);   // shows fields added since
@@ -215,7 +270,7 @@ modded class MissionServer
 			m_MDT_Config.mapId.ToLower();
 		}
 		int seconds = Math.Max(15, m_MDT_Config.pollSeconds);
-		Print("[MapDrawingTool] live url '" + m_MDT_Config.liveUrl + "', lan url '" + m_MDT_Config.lanUrl + "', map '" + m_MDT_Config.mapId + "', every " + seconds + " s, in-game drawing " + (m_MDT_Config.serverKey != ""));
+		Print("[MapDrawingTool] live url '" + m_MDT_Config.liveUrl + "', lan url '" + m_MDT_Config.lanUrl + "', map '" + m_MDT_Config.mapId + "', every " + seconds + " s, in-game drawing " + (m_MDT_Config.serverKey != "") + ", paper texture " + m_MDT_Config.paperTexture);
 		MDT_Poll();
 		GetGame().GetCallQueue(CALL_CATEGORY_SYSTEM).CallLater(MDT_Poll, seconds * 1000, true);
 		MDT_Events.SubmitPiece.Insert(MDT_OnSubmitPiece);
@@ -249,14 +304,12 @@ modded class MissionServer
 			MDT_ReadMarkersFile();
 			return;
 		}
-		RestApi api = GetRestApi();
-		if (!api)
-			api = CreateRestApi();
+		RestApi api = MDT_Rest.Api();
 		if (!api)
 			return;
-		if (!m_MDT_Callback)
-			m_MDT_Callback = new MDT_ManifestCallback();
-		api.GetRestContext(m_MDT_Url).GET(m_MDT_Callback, "api/" + m_MDT_Config.mapId + "/live");
+		MDT_ManifestCallback cb = new MDT_ManifestCallback();   // one per request (MDT_Rest keeps it)
+		MDT_Rest.Keep(cb);
+		api.GetRestContext(m_MDT_Url).GET(cb, "api/" + m_MDT_Config.mapId + "/live");
 		MDT_PollPlayers();
 	}
 
@@ -281,9 +334,7 @@ modded class MissionServer
 
 	protected void MDT_PostPersonal(string path, string uid, Class body)
 	{
-		RestApi api = GetRestApi();
-		if (!api)
-			api = CreateRestApi();
+		RestApi api = MDT_Rest.Api();
 		if (!api)
 			return;
 		string json, error;
@@ -295,6 +346,7 @@ modded class MissionServer
 		m_MDT_PersonalWaiting.Insert(cb);
 		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
+		MDT_Rest.Keep(cb);
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + path, json);
 	}
 
@@ -415,13 +467,14 @@ modded class MissionServer
 		mine.mapId = g.mapId;
 		mine.world = g.world;
 		mine.options = g.options;
-		mine.paper = g.paper;
+		if (m_MDT_Config.paperTexture)
+			mine.paper = g.paper;
 		MDT_AddWork(mine, g.markers, g.layers);
 		MDT_Personal p;
 		if (m_MDT_Personal.Find(uid, p))
 		{
 			MDT_AddWork(mine, p.markers, p.layers);
-			if (p.paper)
+			if (p.paper && m_MDT_Config.paperTexture)
 				mine.paper = p.paper;                // global + personal texture
 		}
 		mine.version = "";
@@ -548,9 +601,7 @@ modded class MissionServer
 		string body;
 		JsonFileLoader<MDT_Submit>.MakeData(submit, body, error, false);
 
-		RestApi api = GetRestApi();
-		if (!api)
-			api = CreateRestApi();
+		RestApi api = MDT_Rest.Api();
 		if (!api)
 		{
 			MDT_Reply(player, sender, false, "The server cannot reach the map web app");
@@ -560,6 +611,7 @@ modded class MissionServer
 		m_MDT_Waiting.Insert(cb);
 		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
+		MDT_Rest.Keep(cb);
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + "/ingame", body);
 		Print(string.Format("[MapDrawingTool] in-game drawing from %1: %2 items, %3 points, %4", sender.GetName(), items, points, submit.scope));
 	}
@@ -593,7 +645,7 @@ modded class MissionServer
 		if (m_MDT_Personal.Find(holder.GetIdentity().GetPlainId(), p) && p.paper)
 			paper = p.paper;
 		string json, error;
-		if (paper)
+		if (paper && m_MDT_Config.paperTexture)
 			JsonFileLoader<MDT_Layer>.MakeData(paper, json, error, false);
 		ScriptRPC rpc = new ScriptRPC();
 		rpc.Write(json);
@@ -646,9 +698,7 @@ modded class MissionServer
 		up.steamId = uid;
 		string body, error;
 		JsonFileLoader<MDT_Upload>.MakeData(up, body, error, false);
-		RestApi api = GetRestApi();
-		if (!api)
-			api = CreateRestApi();
+		RestApi api = MDT_Rest.Api();
 		if (!api)
 		{
 			MDT_UploadReply(uid, name, false, "", "", 0, "the server cannot reach the map web app");
@@ -658,6 +708,7 @@ modded class MissionServer
 		m_MDT_UpWaiting.Insert(cb);
 		RestContext ctx = api.GetRestContext(m_MDT_Url);
 		ctx.SetHeader("application/json");
+		MDT_Rest.Keep(cb);
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + "/ingame/upload", body);
 	}
 
@@ -719,9 +770,7 @@ modded class MissionServer
 			MDT_ReplyTo(uid, false, "This server is not set up for in-game drawing (serverKey)");
 			return;
 		}
-		RestApi api = GetRestApi();
-		if (!api)
-			api = CreateRestApi();
+		RestApi api = MDT_Rest.Api();
 		if (!api)
 			return;
 		MDT_PlayerAsk ask = new MDT_PlayerAsk();
@@ -737,6 +786,7 @@ modded class MissionServer
 		string path = "/ingame/mine";
 		if (withdraw)
 			path = "/ingame/withdraw";
+		MDT_Rest.Keep(cb);
 		ctx.POST(cb, "api/" + m_MDT_Config.mapId + path, body);
 	}
 
